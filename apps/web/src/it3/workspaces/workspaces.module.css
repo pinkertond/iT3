@@ -1,0 +1,181 @@
+.iw-scroll {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+.iw {
+  max-width: 65rem;
+  margin: auto;
+  padding: clamp(1.1rem, 4vw, 3.5rem);
+  color: var(--foreground);
+}
+.iw h1 {
+  font-size: clamp(2rem, 4vw, 3.4rem);
+  font-weight: 580;
+  letter-spacing: -0.055em;
+  line-height: 1.05;
+  margin: 1rem 0;
+}
+.iw h2 {
+  font-size: 1.35rem;
+  font-weight: 580;
+  letter-spacing: -0.025em;
+  margin: 1.4rem 0 0.8rem;
+}
+.iw h3 {
+  font-weight: 600;
+  font-size: 1.2rem;
+  margin-top: 1rem;
+}
+.iw h4 {
+  font-weight: 550;
+  margin-top: 1rem;
+}
+.iw .iw-secondary,
+.iw small,
+.iw-crumb,
+.iw-row em {
+  color: var(--muted-foreground);
+  font-style: normal;
+}
+.iw small {
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+.iw h2 small {
+  margin-left: 0.45rem;
+}
+.iw-crumb,
+.iw-title,
+.iw-pager,
+.iw-row,
+.iw-back,
+.iw-search {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.iw-crumb {
+  font-size: 0.85rem;
+  flex-wrap: wrap;
+}
+.iw-title,
+.iw-pager {
+  justify-content: space-between;
+}
+.iw :is(button, summary, select) {
+  cursor: pointer;
+}
+.iw :disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.iw :focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.iw .iw-filters,
+.iw .iw-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+  margin: 1.5rem 0;
+}
+.iw label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--muted-foreground);
+}
+.iw :is(select, input),
+.iw-action,
+.iw-form button,
+.iw-tabs button,
+.iw-pager button {
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  padding: 0.45rem 0.7rem;
+}
+.iw-search {
+  gap: 0;
+  border: 1px solid var(--border);
+  padding-left: 0.55rem;
+  border-radius: 0.45rem;
+}
+.iw-search input {
+  border: 0;
+  width: 12rem;
+}
+.iw-row {
+  width: 100%;
+  padding: 0.75rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.iw-row span {
+  flex: 1;
+  min-width: 0;
+}
+.iw-row strong,
+.iw-row small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.iw-row strong {
+  font-weight: 550;
+}
+.iw-row:hover,
+.iw-tabs [aria-pressed="true"] {
+  background: var(--muted);
+}
+.iw-tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin: 1rem 0;
+}
+.iw summary,
+.iw-back,
+.iw-library article > button,
+.iw-library .iw-title button {
+  font-size: 0.85rem;
+  padding: 0.5rem 0;
+}
+.iw p {
+  margin: 0.65rem 0;
+  overflow-wrap: anywhere;
+}
+.iw .iw-chats,
+.iw-library {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+.iw-pager {
+  margin: 0.75rem 0;
+}
+
+.iw-graph-origin {
+  display: inline-block;
+  border: 1px solid var(--border);
+  border-radius: 0.45rem;
+  padding: 0.35rem 0.65rem;
+  font-weight: 550;
+}
+.iw-graph-origin + .iw-list {
+  margin-left: 1.1rem;
+  padding-left: 1.1rem;
+  border-left: 1px solid var(--border);
+}
+.iw-graph-origin + .iw-list .iw-row {
+  position: relative;
+}
+.iw-graph-origin + .iw-list .iw-row::before {
+  content: "";
+  position: absolute;
+  width: 1rem;
+  left: -1.1rem;
+  border-top: 1px solid var(--border);
+}

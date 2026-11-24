@@ -1,0 +1,482 @@
+import styles from "./workspaces.module.css";
+import { T, useGT } from "gt-react";
+import { useState } from "react";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { AuthSettingsWriteScope, type EnvironmentId } from "@t3tools/contracts";
+import { FolderOpen, ChevronRight, Layers, Search } from "lucide-react";
+import {
+  useProjects,
+  useServerConfigs,
+  useAllEnvironmentProjectSnapshotsReady,
+  useThreadShellsForProjectRefs,
+} from "~/state/entities";
+import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "~/state/environments";
+import { useEnvironmentScope } from "~/state/session";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { serverEnvironment } from "~/state/server";
+import { useProjectGroupUpdate } from "~/hooks/useProjectGroupUpdate";
+import { WorkspacePageHeader } from "~/components/WorkspacePageHeader";
+import { SidebarInset } from "~/components/ui/sidebar";
+import { isElectron } from "~/env";
+import type { Project } from "~/types";
+import {
+  starterWorkspaces,
+  statuses,
+  projectPlacement,
+  workspaceKey,
+  type ProjectStatus,
+  type Directory,
+} from "./directory";
+import { useWorkspaceView } from "./view";
+import { ProjectLibrary } from "./ProjectLibrary";
+
+import { PageList } from "./PageList";
+
+const route = "/workspaces";
+type SearchState = {
+  env?: string;
+  project?: string;
+  status?: string;
+  node?: string;
+  workspace?: string;
+};
+const capitalize = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
+export function WorkspacesPage() {
+  const gt = useGT();
+  const query = useSearch({ strict: false }) as SearchState;
+  const navigate = useNavigate();
+  const projects = useProjects();
+  const configs = useServerConfigs();
+  const identities = useEnvironmentIdentities();
+  const primary = usePrimaryEnvironmentId();
+  const ready = useAllEnvironmentProjectSnapshotsReady();
+  const stored = useWorkspaceView((s) => s.workspace);
+  const select = useWorkspaceView((s) => s.select);
+  const active = query.workspace ?? stored;
+  const names = new Map(starterWorkspaces.map((n) => [workspaceKey(n), n]));
+  for (const config of configs.values()) {
+    for (const n of Object.values(config.settings.it3Workspaces?.names ?? {}))
+      names.set(workspaceKey(n), n);
+    for (const p of Object.values(config.settings.it3Workspaces?.projects ?? {}))
+      if (p.workspace) names.set(workspaceKey(p.workspace), p.workspace);
+  }
+  const [search, setSearch] = useState("");
+  const host =
+    identities.find(
+      (e) =>
+        e.environmentId === primary &&
+        configs.get(e.environmentId)?.environment.capabilities.it3Workspaces,
+    )?.environmentId ??
+    identities.find((e) => configs.get(e.environmentId)?.environment.capabilities.it3Workspaces)
+      ?.environmentId ??
+    null;
+  const [creationHost, setCreationHost] = useState<EnvironmentId | null>(null);
+  const target = creationHost ?? host;
+  const canCreate = useEnvironmentScope(target, AuthSettingsWriteScope);
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const write = useAtomCommand(serverEnvironment.updateSettings, "workspace directory");
+  const filter =
+    query.status === "all" || statuses.some((s) => s === query.status)
+      ? (query.status ?? "active")
+      : "active";
+  const go = (search: SearchState) => void navigate({ to: route, search });
+  const choose = (workspace: string) => {
+    select(workspace);
+    setSearch("");
+    go({ workspace, status: filter });
+  };
+  const changeName = async () => {
+    const label = name.trim().normalize("NFC");
+    if (!target || !label || saving) return;
+    const key = workspaceKey(label);
+    if (names.has(key) || key === workspaceKey("Everything")) {
+      setError(gt("A workspace with that name already exists."));
+      return;
+    }
+    setSaving(true);
+    try {
+      const result = await write({
+        environmentId: target,
+        input: { patch: { it3Workspaces: { names: { [key]: label } } } },
+      });
+      if (result._tag !== "Success") {
+        setError(gt("The workspace could not be saved."));
+        return;
+      }
+      choose(key);
+      setName("");
+      setCreating(false);
+      setError("");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const selected = projects.find((p) => p.environmentId === query.env && p.id === query.project);
+  const labelFor = (id: EnvironmentId) =>
+    identities.find((e) => e.environmentId === id)?.label ?? id;
+  const visible = projects
+    .filter((p) => {
+      const row = projectPlacement(p, configs.get(p.environmentId)?.settings.it3Workspaces);
+      return (
+        (!active || workspaceKey(row.workspace) === active) &&
+        (filter === "all" || row.status === filter) &&
+        (p.title + " " + labelFor(p.environmentId))
+          .toLowerCase()
+          .includes(search.trim().toLowerCase())
+      );
+    })
+    .sort(
+      (a, b) => a.title.localeCompare(b.title) || a.environmentId.localeCompare(b.environmentId),
+    );
+  return (
+    <SidebarInset className="h-dvh overflow-hidden">
+      <WorkspacePageHeader electron={isElectron} />
+      <div className={styles["iw-scroll"]}>
+        <div className={styles["iw"]}>
+          <nav className={styles["iw-crumb"]} aria-label={gt("Breadcrumb")}>
+            <Layers size={16} />
+            <button onClick={() => go({ workspace: active, status: filter })}>
+              <T>Workspaces</T>
+            </button>
+            <ChevronRight size={14} />
+            <span>
+              {names.get(active) ?? (active ? gt("Selected workspace") : gt("Everything"))}
+            </span>
+            {selected && (
+              <>
+                <ChevronRight size={14} />
+                <span>{selected.title}</span>
+              </>
+            )}
+          </nav>
+          {query.project ? (
+            selected ? (
+              <ProjectHome
+                key={JSON.stringify([selected.environmentId, selected.id])}
+                project={selected}
+                machine={labelFor(selected.environmentId)}
+                names={names}
+                directory={configs.get(selected.environmentId)?.settings.it3Workspaces}
+                supported={
+                  configs.get(selected.environmentId)?.environment.capabilities.it3Workspaces ===
+                  true
+                }
+                node={query.node}
+                onNode={(node) => {
+                  const next = { ...query };
+                  if (node) next.node = node;
+                  else delete next.node;
+                  go(next);
+                }}
+              />
+            ) : (
+              <p role="status">
+                {ready
+                  ? gt("Project unavailable in the connected environments.")
+                  : gt("Loading project…")}
+              </p>
+            )
+          ) : (
+            <>
+              <div className={styles["iw-title"]}>
+                <h1>{names.get(active) ?? (active ? gt("Workspace") : gt("Everything"))}</h1>
+                <button
+                  className={styles["iw-action"]}
+                  onClick={() => {
+                    setCreating(!creating);
+                    setError("");
+                  }}
+                >
+                  {creating ? gt("Cancel") : gt("New workspace")}
+                </button>
+              </div>
+              {creating && (
+                <form
+                  className={styles["iw-form"]}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void changeName();
+                  }}
+                >
+                  <label>
+                    <T>Workspace name</T>
+                    <input
+                      autoFocus
+                      value={name}
+                      maxLength={80}
+                      required
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <T>Save on</T>
+                    <select
+                      aria-label={gt("Save on")}
+                      value={target ?? ""}
+                      onChange={(e) => setCreationHost(e.target.value as EnvironmentId)}
+                    >
+                      {identities
+                        .filter(
+                          (e) =>
+                            configs.get(e.environmentId)?.environment.capabilities.it3Workspaces,
+                        )
+                        .map((e) => (
+                          <option key={e.environmentId} value={e.environmentId}>
+                            {e.label}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <button disabled={!target || !canCreate || saving || !name.trim()}>
+                    <T>Create</T>
+                  </button>
+                  {(!target || !canCreate) && (
+                    <p>
+                      <T>Connect an iT3 environment with settings access to create workspaces.</T>
+                    </p>
+                  )}
+                </form>
+              )}
+              {error && <p role="alert">{error}</p>}
+              <div className={styles["iw-filters"]}>
+                <label>
+                  <T>Workspace</T>
+                  <select
+                    aria-label={gt("Workspace")}
+                    value={active}
+                    onChange={(e) => choose(e.target.value)}
+                  >
+                    <option value="">
+                      <T>Everything</T>
+                    </option>
+                    {Array.from(names, ([id, label]) => (
+                      <option key={id} value={id}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <T>Project status</T>
+                  <select
+                    aria-label={gt("Project status")}
+                    value={filter}
+                    onChange={(e) => go({ workspace: active, status: e.target.value })}
+                  >
+                    {["active", "paused", "idle", "archived", "all"].map((s) => (
+                      <option key={s} value={s}>
+                        {s === "all" ? gt("All statuses") : capitalize(s)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <T>Find a project</T>
+                  <span className={styles["iw-search"]}>
+                    <Search size={15} />
+                    <input
+                      type="search"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
+                  </span>
+                </label>
+              </div>
+              <h2>
+                <T>Projects</T> <small>{visible.length}</small>
+              </h2>
+              <div className={styles["iw-list"]}>
+                <PageList key={active + filter + search} items={visible}>
+                  {(p) => (
+                    <Link
+                      className={styles["iw-row"]}
+                      key={JSON.stringify([p.environmentId, p.id])}
+                      to={route}
+                      search={{
+                        workspace: active,
+                        status: filter,
+                        env: p.environmentId,
+                        project: p.id,
+                      }}
+                    >
+                      <FolderOpen size={19} />
+                      <span>
+                        <strong>{p.title}</strong>
+                        <small>
+                          {labelFor(p.environmentId)} ·{" "}
+                          {projectPlacement(p, configs.get(p.environmentId)?.settings.it3Workspaces)
+                            .workspace || gt("Unassigned")}
+                        </small>
+                      </span>
+                      <em>
+                        {capitalize(
+                          projectPlacement(p, configs.get(p.environmentId)?.settings.it3Workspaces)
+                            .status,
+                        )}
+                      </em>
+                      <ChevronRight size={16} />
+                    </Link>
+                  )}
+                </PageList>
+              </div>
+              {!visible.length && (
+                <p role="status">
+                  {ready ? gt("No projects match this view.") : gt("Loading projects…")}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </SidebarInset>
+  );
+}
+
+function ProjectHome({
+  project: p,
+  machine,
+  names,
+  directory,
+  supported,
+  node,
+  onNode,
+}: {
+  project: Project;
+  machine: string;
+  names: Map<string, string>;
+  directory: Directory | undefined;
+  supported: boolean;
+  node: string | undefined;
+  onNode: (n: string | undefined) => void;
+}) {
+  const gt = useGT();
+  const placement = projectPlacement(p, directory);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const writable = useEnvironmentScope(p.environmentId, AuthSettingsWriteScope);
+  const write = useAtomCommand(serverEnvironment.updateSettings, "project placement");
+  const { updateProjectGroup, canOrganizeProjectGroup } = useProjectGroupUpdate();
+  const member = { ...p, environmentLabel: machine };
+  const threads = useThreadShellsForProjectRefs([
+    { environmentId: p.environmentId, projectId: p.id },
+  ]);
+  const mutate = async (change: { workspace?: string | null; status?: ProjectStatus }) => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      if (change.status !== "archived") {
+        const result = await write({
+          environmentId: p.environmentId,
+          input: {
+            patch: {
+              it3Workspaces: {
+                projects: {
+                  [p.id]: change as {
+                    workspace?: string | null;
+                    status?: "active" | "paused" | "idle";
+                  },
+                },
+              },
+            },
+          },
+        });
+        if (result._tag !== "Success") {
+          setError(gt("Could not save the project change."));
+          return;
+        }
+      }
+      if (change.status && (change.status === "archived" || p.archivedAt)) {
+        const result = await updateProjectGroup(
+          [member],
+          { archived: change.status === "archived" },
+          "Could not update project archive",
+        );
+        if (result._tag !== "Success")
+          setError(gt("Could not update the project archive. Retry to finish."));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <h1>{p.title}</h1>
+      <p className={styles["iw-secondary"]}>
+        {machine} · {p.workspaceRoot}
+      </p>
+      <div className={styles["iw-filters"]}>
+        <label>
+          <T>Workspace</T>
+          <select
+            aria-label={gt("Workspace")}
+            value={placement.workspace ? workspaceKey(placement.workspace) : ""}
+            disabled={!supported || !writable || busy}
+            onChange={(e) => void mutate({ workspace: names.get(e.target.value) ?? null })}
+          >
+            <option value="">
+              <T>Unassigned</T>
+            </option>
+            {Array.from(names, ([id, n]) => (
+              <option key={id} value={id}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <T>Project status</T>
+          <select
+            aria-label={gt("Project status")}
+            value={placement.status}
+            disabled={!supported || !writable || busy}
+            onChange={(e) => void mutate({ status: e.target.value as ProjectStatus })}
+          >
+            {statuses.map((s) => (
+              <option
+                key={s}
+                value={s}
+                disabled={s === "archived" && !canOrganizeProjectGroup([member])}
+              >
+                {capitalize(s)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {!supported && (
+        <p className={styles["iw-secondary"]}>
+          <T>Workspace changes require an iT3 host with workspace support.</T>
+        </p>
+      )}
+      {error && <p role="alert">{error}</p>}
+      <ProjectLibrary project={p} node={node} onNode={onNode} />
+      <details className={styles["iw-chats"]}>
+        <summary>
+          <T>Chats</T> <small>{threads.length}</small>
+        </summary>
+        <PageList items={threads}>
+          {(t) => (
+            <Link
+              key={t.id}
+              className={styles["iw-row"]}
+              to="/$environmentId/$threadId"
+              params={{ environmentId: t.environmentId, threadId: t.id }}
+            >
+              {t.title}
+              <ChevronRight size={16} />
+            </Link>
+          )}
+        </PageList>
+        {threads.length === 0 && (
+          <p>
+            <T>No chats in this project.</T>
+          </p>
+        )}
+      </details>
+    </>
+  );
+}

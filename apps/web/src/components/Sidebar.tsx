@@ -1,3 +1,5 @@
+import { projectPlacement, workspaceKey } from "../it3/workspaces/directory";
+import { useWorkspaceView } from "../it3/workspaces/view";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { msg, T, useGT, useMessages } from "gt-react";
 import { m } from "../i18n/messages";
@@ -827,7 +829,21 @@ function useSidebarLookups() {
   const environments = useEnvironmentIdentities();
   const serverConfigs = useServerConfigs();
   const providerEntriesByEnvironment = useAtomValue(sidebarProviderEntriesAtom);
-  const projectGroups = useSidebarProjectGroups();
+  const workspace = useWorkspaceView((s) => s.workspace);
+  const include = (p: (typeof projects)[number]) => {
+    const placement = projectPlacement(
+      p,
+      serverConfigs.get(p.environmentId)?.settings?.it3Workspaces,
+    );
+    return (
+      placement.status === "active" &&
+      (!workspace || workspaceKey(placement.workspace) === workspace)
+    );
+  };
+  const visibleProjects = new Set(
+    projects.filter(include).map((p) => JSON.stringify([p.environmentId, p.id])),
+  );
+  const projectGroups = useSidebarProjectGroups(include);
   const environmentLabelById = new Map(
     environments.map((environment) => [environment.environmentId, environment.label] as const),
   );
@@ -854,6 +870,7 @@ function useSidebarLookups() {
   ];
   return {
     projects,
+    visibleProjects,
     serverConfigs,
     projectGroups,
     environmentLabelById,
@@ -923,6 +940,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const messages = useMessages();
   const {
     projects,
+    visibleProjects,
     serverConfigs,
     projectGroups,
     environmentLabelById,
@@ -1120,7 +1138,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             ),
           ),
         );
-  const threads = useQuietThreadShells();
+  const threads = useQuietThreadShells().filter((t) =>
+    visibleProjects.has(JSON.stringify([t.environmentId, t.projectId])),
+  );
   const promotingDraftThreadKeys = usePromotingDraftThreadKeys();
   const listedThreads =
     promotingDraftThreadKeys.length === 0
@@ -3069,6 +3089,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         className="min-h-full"
         fixedHeader={
           <SidebarGroup className="z-[1]">
+            <button
+              type="button"
+              className="mx-1 mb-1 rounded-md px-2 py-1.5 text-left text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => {
+                if (isMobile) setOpenMobile(false);
+                void router.navigate({ to: "/workspaces" });
+              }}
+            >
+              {gt("Workspaces")}
+            </button>
             <SidebarThreadHeader
               hasProjects={projectGroups.length > 0}
               projectScope={

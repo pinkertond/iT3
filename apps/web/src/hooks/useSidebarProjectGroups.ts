@@ -11,8 +11,11 @@ import { useDelegatedUnderParent, useProjects, useQuietThreadShells } from "../s
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
 
-export function useSidebarProjectGroups() {
-  const projects = useProjects();
+export function useSidebarProjectGroups(
+  include?: (project: import("../types").Project) => boolean,
+) {
+  const allProjects = useProjects();
+  const projects = include ? allProjects.filter(include) : allProjects;
   // Activity order lags a running thread's streaming ticks until its next
   // real change; reading every tick re-rendered the whole sidebar with it.
   const threads = useQuietThreadShells();

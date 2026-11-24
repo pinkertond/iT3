@@ -1377,7 +1377,21 @@ export const CloudSpeechCredentials = Schema.Struct({
   openrouter: CloudSpeechCredential,
 });
 
+// Sparse host settings keep workspace assignments shared by all clients of an environment.
+const It3WorkspaceLabel = TrimmedNonEmptyString.check(Schema.isMaxLength(80));
+const It3ProjectPlacement = Schema.Struct({
+  workspace: Schema.optionalKey(Schema.NullOr(It3WorkspaceLabel)),
+  status: Schema.optionalKey(Schema.Literals(["active", "paused", "idle"])),
+});
+const It3WorkspaceDirectory = Schema.Struct({
+  names: Schema.optionalKey(
+    Schema.Record(Schema.String.check(Schema.isPattern(/^w-.{1,960}$/)), It3WorkspaceLabel),
+  ),
+  projects: Schema.optionalKey(Schema.Record(ProjectId, It3ProjectPlacement)),
+});
+
 export const ServerSettings = Schema.Struct({
+  it3Workspaces: Schema.optionalKey(It3WorkspaceDirectory),
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   providerModelPreferences: Schema.NullOr(ProviderModelPreferences).pipe(
@@ -1823,6 +1837,7 @@ const ModelSelectionPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  it3Workspaces: Schema.optionalKey(It3WorkspaceDirectory),
   setModelFavorites: Schema.optionalKey(
     Schema.Array(Schema.Struct({ ...ModelFavorite.fields, favorite: Schema.Boolean })),
   ),

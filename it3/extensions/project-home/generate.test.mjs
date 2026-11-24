@@ -1,0 +1,46 @@
+import * as NodeTest from "node:test";
+const { test } = NodeTest;
+import * as NodeAssert from "node:assert/strict";
+const assert = NodeAssert.default;
+import * as NodeChildProcess from "node:child_process";
+const { execFileSync, spawnSync } = NodeChildProcess;
+import * as NodeFS from "node:fs";
+const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = NodeFS;
+import * as NodeOS from "node:os";
+const { tmpdir } = NodeOS;
+import * as NodePath from "node:path";
+const { join } = NodePath;
+import * as NodeURL from "node:url";
+const { fileURLToPath } = NodeURL;
+import * as NodeSqlite from "node:sqlite";
+const { DatabaseSync } = NodeSqlite;
+test("publishes one checked snapshot, paginates at twelve, detects drift, and rejects duplicate IDs", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "it3-home-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "docs", "law.md");
+  const cli = fileURLToPath(new URL("./generate.mjs", import.meta.url));
+  const run = (...args) => spawnSync(process.execPath, [cli, dir, ...args], { encoding: "utf8" });
+  execFileSync("git", ["init", "-q", dir]);
+  mkdirSync(join(dir, "docs"));
+  const law = "---\nid: law.one\nkind: law\ntitle: One record\n---\n# One record\n";
+  writeFileSync(file, law);
+  for (let i = 0; i < 13; i++) writeFileSync(join(dir, "docs", i + ".md"), "# Item " + i);
+  execFileSync("git", ["-C", dir, "add", "docs"]);
+  assert.equal(run().status, 0);
+  assert.equal(run("--check").status, 0);
+  const home = join(dir, ".it3", "home");
+  const index = JSON.parse(readFileSync(join(home, "index.json")));
+  const first = JSON.parse(
+    readFileSync(join(home, index.digest, "pages", index.sections.Documentation.page + ".json")),
+  );
+  assert.equal(first.rows.length, 12);
+  assert.ok(first.next);
+  const db = new DatabaseSync(join(home, index.digest, "records.sqlite"), { readOnly: true });
+  assert.equal(db.prepare("select count(*) as n from nodes").get().n, 14);
+  db.close();
+  writeFileSync(file, law + "Changed");
+  assert.notEqual(run("--check").status, 0);
+  writeFileSync(join(dir, "docs", "0.md"), law);
+  assert.match(run().stderr, /Duplicate record ID/);
+  assert.equal(JSON.parse(readFileSync(join(home, "index.json"))).digest, index.digest);
+});

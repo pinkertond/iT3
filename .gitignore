@@ -51,3 +51,6 @@ node_modules/
 .pnpm-store/
 
 /packages/ssh/.ssh-launcher-test-*/
+
+# Generated iT3 project documentation and index.
+/.it3/home/
