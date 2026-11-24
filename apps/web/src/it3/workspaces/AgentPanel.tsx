@@ -112,6 +112,9 @@ function Roster({ selected: t }: { selected: EnvironmentThreadShell }) {
             <Link to="/workspaces" search={{ ...home, view: "agents" }}>
               <T>Project</T>
             </Link>
+            <Link to="/workspaces" search={{ ...home, view: "tasks", agent: t.id }}>
+              <T>Tasks</T>
+            </Link>
             <Link to="/workspaces" search={{ ...home, view: "docs" }}>
               <T>Docs</T>
             </Link>

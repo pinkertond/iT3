@@ -1,3 +1,5 @@
+import { handleTaskWrite } from "./it3/taskHandoff.ts";
+import { readTask } from "./it3/taskLedger.ts";
 import { readProjectUsageOwners } from "./it3/projectUsage.ts";
 import { GitCommandError, OrchestrationDispatchCommandError } from "@t3tools/contracts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- A synchronous digest inside the pure provider mapping.
@@ -2815,6 +2817,16 @@ export const layerWsRpc = (
           processResourceMonitor.readHistory(input),
         [WS_METHODS.serverGetResourceTelemetryHistory]: (input) =>
           resourceTelemetry.readHistory(input),
+        [WS_METHODS.it3ReadTasks]: (input) =>
+          readTask(config.stateDir, input.projectId, input.key, input.offset, input.threadId),
+        [WS_METHODS.it3WriteTask]: (input) =>
+          handleTaskWrite(
+            config.stateDir,
+            input,
+            currentSessionId,
+            threadManagement,
+            projectService,
+          ),
         [WS_METHODS.serverGetUsageSummary]: (input) =>
           input.it3ProjectId === undefined
             ? usage.readSummary(input)

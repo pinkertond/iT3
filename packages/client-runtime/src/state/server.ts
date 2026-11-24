@@ -1666,6 +1666,14 @@ export function createServerEnvironmentAtoms<R, E>(
     // long enough that switching windows or re-rendering does not rescan. With
     // nothing to show yet, the server's last scan answers first, then a plain
     // read, then a read that waits for slow sources.
+    it3Tasks: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "it3:task-read",
+      tag: WS_METHODS.it3ReadTasks,
+    }),
+    it3WriteTask: createEnvironmentRpcCommand(runtime, {
+      label: "it3:task-edit",
+      tag: WS_METHODS.it3WriteTask,
+    }),
     usageSummary: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:usage-summary",
       tag: WS_METHODS.serverGetUsageSummary,

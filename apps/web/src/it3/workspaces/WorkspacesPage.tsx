@@ -1,3 +1,4 @@
+import { TaskBoard } from "./TaskBoard";
 import styles from "./workspaces.module.css";
 import { T, useGT } from "gt-react";
 import { useState } from "react";
@@ -40,6 +41,8 @@ const route = "/workspaces";
 type SearchState = {
   assign?: string;
   view?: string;
+  task?: string;
+  source?: string;
   agent?: string;
   env?: string;
   project?: string;
@@ -397,6 +400,8 @@ function ProjectHome({
     : tree.roots.length === 1
       ? tree.roots[0]
       : undefined;
+  const taskSupported =
+    useServerConfigs().get(p.environmentId)?.environment.capabilities.it3Tasks === true;
   const view = node ? "docs" : (query.view ?? "agents");
   const [taskThread, setTaskThread] = useState("");
   const [reference, setReference] = useState(query.assign ?? "");
@@ -518,6 +523,7 @@ function ProjectHome({
       <nav className={styles["iw-tabs"]} aria-label={gt("Project views")}>
         {[
           ["agents", gt("Agents")],
+          ["tasks", gt("Tasks")],
           ["docs", gt("Documentation")],
           ["usage", gt("Usage and cost")],
         ].map(([key, label]) => (
@@ -527,6 +533,7 @@ function ProjectHome({
             onClick={() => {
               const next = { ...query, view: key! };
               delete next.node;
+              delete next.agent;
               go(next);
             }}
           >
@@ -534,7 +541,31 @@ function ProjectHome({
           </button>
         ))}
       </nav>
-      {view === "docs" ? (
+      {view === "tasks" ? (
+        taskSupported ? (
+          <TaskBoard
+            key={JSON.stringify([query.task, query.assign])}
+            project={p}
+            threads={threads}
+            selected={query.task}
+            thread={query.agent}
+            seed={query.assign}
+            source={query.source}
+            onSelect={(id) => {
+              const q = { ...query, view: "tasks" };
+              delete q.assign;
+              delete q.source;
+              if (id) q.task = id;
+              else delete q.task;
+              go(q);
+            }}
+          />
+        ) : (
+          <p>
+            <T>Update this environment to enable shared tasks.</T>
+          </p>
+        )
+      ) : view === "docs" ? (
         <ProjectLibrary project={p} node={node} onNode={onNode} />
       ) : view === "usage" ? (
         <ProjectUsage

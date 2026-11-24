@@ -1,3 +1,5 @@
+import * as McpSchema from "effect/ai/McpSchema";
+import { TaskBrief, TaskWorkerEdit } from "@t3tools/contracts";
 import { McpAttachmentInput } from "../attachment/input.ts";
 import {
   clampedPositiveInt,
@@ -193,7 +195,30 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
   .annotate(Tool.Destructive, true)
   .annotate(Tool.OpenWorld, true);
 
+const TaskBriefTool = Tool.make("t3_task_brief", {
+  ...shared,
+  description:
+    "Read the current iT3 task brief for this chat’s project. Use the stable task key from its assignment.",
+  parameters: Schema.Struct({
+    key: TrimmedNonEmptyString,
+    attempt: Schema.optionalKey(Schema.Literals([1, 2])),
+  }),
+  success: TaskBrief,
+  dependencies: [...shared.dependencies, ServerConfig.ServerConfig],
+})
+  .annotate(Tool.Readonly, true)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
+const TaskUpdateTool = Tool.make("t3_task_update", {
+  ...shared,
+  description:
+    "Update this chat’s task attempt. Read its brief first. Claim with intended files and next action. Checkpoint after each subtask with the full current step and file lists. Submit with verification after all steps are done. Copy generation and revision from the latest brief. Retry an identical request with the same requestId.",
+  parameters: TaskWorkerEdit,
+  success: TaskBrief,
+  dependencies: [...shared.dependencies, ServerConfig.ServerConfig],
+}).annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 export const ProjectToolkit = Toolkit.make(
+  TaskBriefTool,
+  TaskUpdateTool,
   ThreadLaunchTool,
   ProjectListTool,
   ProjectReadTool,

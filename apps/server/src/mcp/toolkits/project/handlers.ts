@@ -1,3 +1,5 @@
+import * as It3Config from "../../../config.ts";
+import { readTaskBrief, writeTask } from "../../../it3/taskLedger.ts";
 import {
   CommandId,
   MessageId,
@@ -509,6 +511,55 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
         .listPage({ cursor: input.cursor ?? 0, limit: input.limit ?? 20 })
         .pipe(Effect.mapError(unavailable));
       return { ...page, projects: page.projects.map(yield* withSavedProjectSettings) };
+    }),
+  ),
+  t3_task_brief: McpToolAccess.readsAsCaller((input) =>
+    Effect.gen(function* () {
+      const { caller } = yield* readCaller();
+      if (!caller)
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message: "Open the assigned chat.",
+        });
+      const config = yield* It3Config.ServerConfig;
+      return yield* readTaskBrief(
+        config.stateDir,
+        caller.projectId,
+        input.key,
+        caller.id,
+        input.attempt,
+      ).pipe(
+        Effect.mapError(
+          (e) => new OrchestratorMcpFailure({ code: "invalid_request", message: e.detail }),
+        ),
+      );
+    }),
+  ),
+  t3_task_update: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const { caller } = yield* readCaller();
+      if (!caller)
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message: "Open the assigned chat.",
+        });
+      const config = yield* It3Config.ServerConfig;
+      return yield* writeTask(config.stateDir, caller.projectId, input, {
+        kind: "worker",
+        id: caller.id,
+        title: caller.title,
+        model: caller.modelSelection.model,
+        worktree: caller.worktreePath,
+      }).pipe(
+        Effect.map((task) =>
+          task.comparison
+            ? { ...task, attempts: task.attempts.filter((a) => a.number === input.attempt) }
+            : task,
+        ),
+        Effect.mapError(
+          (e) => new OrchestratorMcpFailure({ code: "invalid_request", message: e.detail }),
+        ),
+      );
     }),
   ),
   t3_project_read: McpToolAccess.reads((input) =>

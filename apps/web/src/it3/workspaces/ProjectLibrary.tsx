@@ -452,11 +452,12 @@ function RecordView({
           search={{
             env: project.environmentId,
             project: project.id,
-            view: "agents",
+            view: "tasks",
             assign: item.id,
+            source: item.file,
           }}
         >
-          <T>Assign to a conversation</T> →
+          <T>Track this task</T> →
         </Link>
       )}
       {item.summary && <p>{item.summary}</p>}
