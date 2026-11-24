@@ -25,6 +25,10 @@ relations:
 
 In **Add step → Project steps**, search by workflow or step name to reuse a published step from another workflow of the same format in this project. The new step copies its settings and records its source workflow, version and node ID. Later edits are independent.
 
+## Connector rule
+
+The arrow tip touches the receiving port. The curve approaches along the port axis and joins the midpoint of the arrowhead’s rear edge. Keep the last few pixels solid on a dashed path so the shaft visibly meets the head. Yes uses a check and a solid line. No uses a cross and a dashed line.
+
 ## Longer-term project views
 
 Start at one project. Choose **Team**, **Workflows**, or **Runs**. Each view opens one level with up to twelve immediate entries. A larger process can contain named subflows. The inspector holds descriptions, evidence and cross-links so the canvas can stay legible.

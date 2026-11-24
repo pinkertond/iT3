@@ -1,3 +1,5 @@
+import { Position } from "@xyflow/react";
+import { workflowConnector } from "./WorkflowEdge";
 import { expect, it, vi } from "vite-plus/test";
 import { useState } from "react";
 import { render } from "../../../test/render";
@@ -97,12 +99,18 @@ function Fixture({ files = [] }: { files?: readonly { name: string; source: stri
 it("edits node labels and wiring, publishes the graph, runs it and opens recorded node evidence", async () => {
   await using screen = await render(<Fixture />, { router: "/workflows" });
   await screen.getByRole("button", { name: "Use suite template" }).click();
-  expect(screen.container.innerText).toContain("Selected node");
-  await screen.getByLabelText("Selected node").selectOptions("review");
+  await screen.getByLabelText("All steps", { exact: true }).click();
+  await screen.getByRole("button", { name: "Prepare a diagnosis brief?", exact: true }).click();
+  await screen.getByRole("button", { name: "Edit step" }).click();
   await screen.getByLabelText("Node label").fill("Triage test failures?");
-  await screen.getByLabelText("Yes", { exact: true }).selectOptions("");
+  await screen.getByRole("button", { name: "Change Yes destination" }).click();
+  await screen.getByRole("button", { name: "Disconnect", exact: true }).click();
   await expect.element(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
-  await screen.getByLabelText("Yes", { exact: true }).selectOptions("brief");
+  await screen.getByRole("button", { name: "Change Yes destination" }).click();
+  await screen
+    .getByRole("group", { name: "Choose destination" })
+    .getByRole("button", { name: "Diagnosis brief", exact: true })
+    .click();
   await screen.getByRole("button", { name: "Publish" }).click();
   const input = captures.save.mock.calls[0]![0].input;
   expect(input.expectedSource).toBeNull();
@@ -111,7 +119,8 @@ it("edits node labels and wiring, publishes the graph, runs it and opens recorde
   );
   await screen.getByRole("button", { name: "Run workflow" }).click();
   await screen.getByRole("button", { name: "Start run" }).click();
-  await screen.getByLabelText("Selected node").selectOptions("start");
+  await screen.getByLabelText("All steps", { exact: true }).click();
+  await screen.getByRole("button", { name: "Suite report", exact: true }).click();
   await expect.element(screen.getByText(/"evidence": "ci\/unit\/42"/)).toBeVisible();
   await expect
     .element(screen.getByRole("link", { name: "Open native run" }))
@@ -142,7 +151,7 @@ it("opens the editor from a project's native Definitions list", async () => {
   await screen.getByRole("textbox", { name: "File name" }).fill("build-review");
   await screen.getByRole("button", { name: "Create", exact: true }).click();
   await expect.element(screen.getByRole("heading", { name: "build-review" })).toBeVisible();
-  await expect.element(screen.getByLabelText("Selected node")).toBeVisible();
+  await expect.element(screen.getByLabelText("All steps", { exact: true })).toBeVisible();
 });
 
 it("builds from a single input, configures reusable steps and publishes a connected workflow", async () => {
@@ -153,7 +162,12 @@ it("builds from a single input, configures reusable steps and publishes a connec
     .getByRole("button", { name: "Add step after Workflow input (next)", exact: true })
     .click();
   await screen.getByRole("button", { name: "Set field", exact: true }).click();
+  await screen.getByRole("button", { name: "Edit step" }).click();
   await screen.getByLabelText("Field name").fill("queue");
+  await screen.getByRole("radio", { name: "Boolean", exact: true }).click();
+  await screen.getByRole("radio", { name: "false", exact: true }).click();
+  await expect.element(screen.getByRole("radio", { name: "false", exact: true })).toBeChecked();
+  await screen.getByRole("radio", { name: "Text", exact: true }).click();
   await screen.getByRole("textbox", { name: "Value", exact: true }).fill("priority");
   await screen.getByRole("button", { name: "Add step", exact: true }).click();
   await screen.getByRole("button", { name: "Output", exact: true }).click();
@@ -197,4 +211,37 @@ it("reuses a published project step with its settings and source revision", asyn
   const node = readCanvas(captures.save.mock.calls[0]![0].input.source)?.revisions[0]?.nodes[1];
   expect(node?.copiedFrom).toEqual({ workflow: "shipping", version: 1, node: "done" });
   expect(node?.id).not.toBe("done");
+});
+
+// Read the rendered SVG geometry through the browser, including its actual cubic tangent.
+it("joins the centre of the arrow's rear edge on rising, falling and backward paths", () => {
+  const svgPath = (d: string) => {
+    const el = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    el.setAttribute("d", d);
+    return el;
+  };
+  for (const [sx, sy] of [
+    [0, 0],
+    [0, 200],
+    [130, 100],
+    [110, 200],
+  ] as const) {
+    const { path, join, head } = workflowConnector(sx, sy, 100, 100, Position.Right, Position.Left);
+    const shaft = svgPath(path),
+      tail = svgPath(join),
+      triangle = svgPath(head);
+    const end = shaft.getPointAtLength(shaft.getTotalLength());
+    const before = shaft.getPointAtLength(shaft.getTotalLength() - 0.05);
+    const base = tail.getPointAtLength(tail.getTotalLength());
+    expect(end.x).toBeCloseTo(tail.getPointAtLength(0).x);
+    expect(end.y).toBeCloseTo(tail.getPointAtLength(0).y);
+    expect(before.x).toBeLessThan(end.x);
+    expect(before.y).toBeCloseTo(end.y, 2);
+    const tip = triangle.getPointAtLength(0);
+    expect([tip.x, tip.y]).toEqual([100, 100]);
+    const wing = triangle.getPointAtLength(Math.hypot(10, 4.5));
+    const otherWing = triangle.getPointAtLength(Math.hypot(10, 4.5) + 9);
+    expect(base.x).toBeCloseTo((wing.x + otherWing.x) / 2);
+    expect(base.y).toBeCloseTo((wing.y + otherWing.y) / 2);
+  }
 });

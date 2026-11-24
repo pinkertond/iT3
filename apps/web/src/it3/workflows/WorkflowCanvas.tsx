@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Background, Controls, Panel, MarkerType, ReactFlow, type Connection } from "@xyflow/react";
+import { Background, Controls, Panel, ReactFlow, type Connection } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { T, useGT } from "gt-react";
 import { Link, useBlocker } from "@tanstack/react-router";
@@ -29,7 +29,9 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import styles from "./workflowCanvas.module.css";
 import { StepLibrary } from "./StepLibrary";
 
-import { ScalarValue, WorkflowCard, arrangeNodes, nodeLibrary } from "./WorkflowNodes";
+import { StepInspector } from "./StepInspector";
+import { WorkflowEdge, WorkflowConnectionPreview } from "./WorkflowEdge";
+import { WorkflowCard, arrangeNodes, nodeLibrary } from "./WorkflowNodes";
 const sample = JSON.stringify(
   {
     suite: "Unit tests",
@@ -41,6 +43,7 @@ const sample = JSON.stringify(
   null,
   2,
 );
+const edgeTypes = { workflow: WorkflowEdge };
 const nodeTypes = { card: WorkflowCard };
 const portLabels = { next: "Next", yes: "Yes", no: "No" };
 const fallbackPosition = (i: number) => ({ x: (i % 4) * 225, y: Math.floor(i / 4) * 150 });
@@ -422,18 +425,11 @@ export default function WorkflowCanvas({
               source: e.from,
               sourceHandle: e.port,
               target: e.to,
-              style:
-                e.from === node.id || e.to === node.id
-                  ? { stroke: "var(--foreground)", strokeWidth: 2.2 }
-                  : {},
-              markerEnd: {
-                type: MarkerType.ArrowClosed,
-                color:
-                  e.from === node.id || e.to === node.id
-                    ? "var(--foreground)"
-                    : "var(--muted-foreground)",
-              },
+              type: "workflow",
+              data: { active: e.from === node.id || e.to === node.id },
             }))}
+            connectionLineComponent={WorkflowConnectionPreview}
+            edgeTypes={edgeTypes}
             nodeTypes={nodeTypes}
             onNodeClick={(_, n) => {
               select(n.id);
@@ -562,131 +558,21 @@ export default function WorkflowCanvas({
           </ReactFlow>
         </div>
         <aside className={styles.inspector}>
-          <div className={styles.inspectorTitle}>
-            <strong>{library[node.kind].title}</strong>
-            <span>
-              <T>Inspector</T>
-            </span>
-          </div>
-          <label>
-            <T>Selected node</T>
-            <select
-              aria-label={gt("Selected node")}
-              value={node.id}
-              onChange={(e) => {
-                select(e.target.value);
-                setPalette(null);
-              }}
-            >
-              {shown.nodes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <T>Node label</T>
-            <input
-              maxLength={160}
-              value={node.label}
-              disabled={locked}
-              onChange={(e) => patchNode({ label: e.target.value })}
-            />
-          </label>
-          {suite && node.kind === "result" && (
-            <label>
-              <T>Result format</T>
-              <select
-                value={node.output}
-                disabled={locked}
-                onChange={(e) =>
-                  patchNode({ output: e.target.value === "brief" ? "brief" : "summary" })
-                }
-              >
-                <option value="summary">
-                  <T>Suite summary</T>
-                </option>
-                <option value="brief">
-                  <T>Diagnosis brief</T>
-                </option>
-              </select>
-            </label>
-          )}
-          {suite && node.kind === "branch" && (
-            <label>
-              <T>Condition</T>
-              <select
-                value={node.predicate}
-                disabled={locked}
-                onChange={(e) =>
-                  patchNode({ predicate: e.target.value === "skipped" ? "skipped" : "failed" })
-                }
-              >
-                <option value="failed">
-                  <T>Has failed tests</T>
-                </option>
-                <option value="skipped">
-                  <T>Has skipped tests</T>
-                </option>
-              </select>
-            </label>
-          )}
-          {node.copiedFrom && (
-            <small className={styles.origin}>
-              {gt("Copied from {workflow}, version {version}", {
-                workflow: node.copiedFrom.workflow,
-                version: node.copiedFrom.version,
-              })}{" "}
-              · {node.copiedFrom.node}
-            </small>
-          )}
-          {!suite && (node.kind === "set" || node.kind === "branch") && (
-            <>
-              <label>
-                <T>Field name</T>
-                <input
-                  value={node.field ?? ""}
-                  disabled={locked}
-                  maxLength={160}
-                  onChange={(e) => patchNode({ field: e.target.value })}
-                />
-              </label>
-              <ScalarValue
-                literal={node.literal ?? '""'}
-                label={node.kind === "branch" ? gt("Equals") : gt("Value")}
-                disabled={locked}
-                onChange={(literal) => patchNode({ literal })}
-              />
-            </>
-          )}
-          {portsFor(node.kind).length > 0 && (
-            <h3 className={styles.sectionLabel}>
-              <T>Connections</T>
-            </h3>
-          )}
-          {portsFor(node.kind).map((port) => (
-            <label key={port}>
-              {portLabels[port]}
-              <select
-                aria-label={portLabels[port]}
-                disabled={locked}
-                value={shown.edges.find((e) => e.from === node.id && e.port === port)?.to ?? ""}
-                onChange={(e) => connect(node.id, port, e.target.value || null)}
-              >
-                <option value="">
-                  <T>Choose destination</T>
-                </option>
-                {shown.nodes
-                  .filter((n) => n.kind !== "start" && n.id !== node.id)
-                  .map((n) => (
-                    <option key={n.id} value={n.id}>
-                      {n.label}
-                    </option>
-                  ))}
-              </select>
-            </label>
-          ))}
+          <StepInspector
+            key={node.id + "/" + (runId ?? "edit")}
+            node={node}
+            graph={shown}
+            locked={locked}
+            suite={suite}
+            select={(id) => {
+              select(id);
+              setPalette(null);
+            }}
+            patch={patchNode}
+            wire={(port, to) => connect(node.id, port, to)}
+            add={(port) => openPalette(node.id, port)}
+            remove={removeNode}
+          />
           {runId ? (
             <section>
               <h3>
@@ -711,11 +597,6 @@ export default function WorkflowCanvas({
             </section>
           ) : (
             <>
-              {node.kind !== "start" && (
-                <Button variant="outline" size="sm" disabled={locked} onClick={removeNode}>
-                  <T>Remove node</T>
-                </Button>
-              )}
               {recent.length > 0 && (
                 <section>
                   <label>

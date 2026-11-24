@@ -12,7 +12,7 @@ Workflows are a Labs feature, off by default. Turn on **Settings → Labs → Wo
 
 Open **Workspaces → project → Workflows → New visual workflow**. Give the definition a lowercase name and choose **Create**. Start with the input node and click **+** on its **Next** port. Choose **Set field**, **Condition**, **Approval**, or **Output**. Each new step connects to the port you picked. **Use suite template** loads an example for reviewing completed tests.
 
-For example, route an incoming request by adding a condition on the field `priority` with the text value `urgent`. Connect **Yes** to an approval and **No** to an output. Both approval paths also need a destination. To send multiple paths to the same output, drag from its source port to the output’s input handle or select the destination in the inspector.
+For example, route an incoming request by adding a condition on the field `priority` with the text value `urgent`. Select the condition to read its rule. **Edit step** opens its settings. Connect **Yes** to an approval and **No** to an output. Both approval paths also need a destination. To send multiple paths to the same output, drag from its source port to the output’s input handle or use the link icon beside the path in the inspector. Click a destination card to follow it.
 
 In **Add step → Project steps**, search by workflow or step name to reuse a published step from another workflow of the same format in this project. The new step copies its settings and records its source workflow, version and node ID. Later edits are independent.
 

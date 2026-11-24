@@ -1,5 +1,17 @@
+import { useId } from "react";
 import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
-import { Braces, CheckCheck, Flag, GitBranch, LogIn, Plus, UserRound } from "lucide-react";
+import {
+  Check,
+  X,
+  ArrowRight,
+  Braces,
+  CheckCheck,
+  Flag,
+  GitBranch,
+  LogIn,
+  Plus,
+  UserRound,
+} from "lucide-react";
 import { useGT } from "gt-react";
 import {
   portsFor,
@@ -91,8 +103,17 @@ export function WorkflowCard({ data }: NodeProps<Node<CardData>>) {
       {ports.length > 0 && (
         <div className={styles.sockets}>
           {ports.map((port) => (
-            <div className={styles.socket} key={port}>
-              <span>{port === "next" ? gt("Next") : port === "yes" ? gt("Yes") : gt("No")}</span>
+            <div className={styles.socket} key={port} data-port={port}>
+              <span>
+                {port === "yes" ? (
+                  <Check size={11} />
+                ) : port === "no" ? (
+                  <X size={11} />
+                ) : (
+                  <ArrowRight size={11} />
+                )}{" "}
+                {port === "next" ? gt("Next") : port === "yes" ? gt("Yes") : gt("No")}
+              </span>
               {data.canInsert && (
                 <button
                   type="button"
@@ -159,15 +180,45 @@ export function arrangeNodes(graph: CanvasGraph) {
   return positions;
 }
 
+export function Choices({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: readonly { id: string; text: string }[];
+  onChange: (value: string) => void;
+}) {
+  const name = useId();
+  return (
+    <fieldset className={styles.choices}>
+      <legend>{label}</legend>
+      <div>
+        {options.map((o) => (
+          <label key={o.id}>
+            <input
+              name={name}
+              type="radio"
+              checked={o.id === value}
+              onChange={() => onChange(o.id)}
+            />
+            <span>{o.text}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 export function ScalarValue({
   literal,
   label,
-  disabled,
   onChange,
 }: {
   literal: string;
   label: string;
-  disabled: boolean;
   onChange: (value: string) => void;
 }) {
   const gt = useGT();
@@ -179,56 +230,50 @@ export function ScalarValue({
         ? "null"
         : "number";
   return (
-    <div className={styles.valueEditor}>
-      <label>
-        {gt("Value type")}
-        <select
-          aria-label={gt("Value type")}
-          value={type}
-          disabled={disabled}
-          onChange={(e) => {
-            const values: Record<string, string> = {
-              text: '""',
-              number: "0",
-              boolean: "true",
-              null: "null",
-            };
-            onChange(values[e.target.value]!);
-          }}
-        >
-          <option value="text">{gt("Text")}</option>
-          <option value="number">{gt("Number")}</option>
-          <option value="boolean">{gt("Boolean")}</option>
-          <option value="null">{gt("Null")}</option>
-        </select>
-      </label>
-      {type !== "null" && (
-        <label>
-          {label}
-          {type === "boolean" ? (
-            <select
-              aria-label={label}
-              value={literal}
-              disabled={disabled}
-              onChange={(e) => onChange(e.target.value)}
-            >
-              <option value="true">true</option>
-              <option value="false">false</option>
-            </select>
-          ) : (
+    <>
+      <Choices
+        label={gt("Value type")}
+        value={type}
+        options={[
+          { id: "text", text: gt("Text") },
+          { id: "number", text: gt("Number") },
+          { id: "boolean", text: gt("Boolean") },
+          { id: "null", text: gt("Null") },
+        ]}
+        onChange={(v) =>
+          onChange(
+            ({ text: '""', number: "0", boolean: "true", null: "null" } as Record<string, string>)[
+              v
+            ]!,
+          )
+        }
+      />
+      {type === "boolean" ? (
+        <Choices
+          label={label}
+          value={literal}
+          options={[
+            { id: "true", text: "true" },
+            { id: "false", text: "false" },
+          ]}
+          onChange={onChange}
+        />
+      ) : (
+        type !== "null" && (
+          <label>
+            {label}
             <input
               aria-label={label}
               type={type === "text" ? "text" : "number"}
               step={type === "number" ? "any" : undefined}
-              disabled={disabled}
               value={type === "text" ? JSON.parse(literal) : literal}
               onChange={(e) =>
                 onChange(type === "text" ? JSON.stringify(e.target.value) : e.target.value)
               }
             />
-          )}
-        </label>
+          </label>
+        )
       )}
-    </div>
+    </>
   );
 }

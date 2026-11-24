@@ -37,7 +37,7 @@
 }
 .body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 15rem;
+  grid-template-columns: minmax(0, 1fr) clamp(16rem, 23vw, 20rem);
   flex: 1;
   min-height: 0;
 }
@@ -196,20 +196,21 @@
   color: var(--muted-foreground);
 }
 .card,
-.choice {
+.choice,
+.stepHeading {
   --tone: light-dark(#196b60, #70d7bb);
 }
-:is(.card, .choice)[data-kind="set"],
-:is(.card, .choice)[data-kind="check"] {
+:is(.card, .choice, .stepHeading)[data-kind="set"],
+:is(.card, .choice, .stepHeading)[data-kind="check"] {
   --tone: light-dark(#1a65b2, #83baff);
 }
-:is(.card, .choice)[data-kind="branch"] {
+:is(.card, .choice, .stepHeading)[data-kind="branch"] {
   --tone: light-dark(#996316, #f3c371);
 }
-:is(.card, .choice)[data-kind="review"] {
+:is(.card, .choice, .stepHeading)[data-kind="review"] {
   --tone: light-dark(#8047a1, #d7a5f4);
 }
-:is(.card, .choice)[data-kind="result"] {
+:is(.card, .choice, .stepHeading)[data-kind="result"] {
   --tone: light-dark(#475c87, #a6bce7);
 }
 .card {
@@ -382,35 +383,241 @@
 .card:focus-within .socket button {
   opacity: 1;
 }
-.valueEditor {
-  display: grid;
-  grid-template-columns: 1fr 1.1fr;
-  gap: 8px;
-}
-.inspectorTitle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 10px;
-}
-.inspectorTitle strong {
-  font-size: 16px;
-}
-.inspectorTitle span,
-.sectionLabel {
-  font-size: 11px;
-  color: var(--muted-foreground);
-}
-.sectionLabel {
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-  font-weight: 650;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
 .socketButton {
   composes: nodrag nopan from global;
+}
+
+.editor {
+  --yes: light-dark(#16715b, #75d9b1);
+  --no: light-dark(#95512f, #edaf88);
+}
+.wire {
+  --wire: var(--muted-foreground);
+  opacity: 0.79;
+}
+.wire[data-active="true"] {
+  opacity: 1;
+}
+[data-port="yes"]:is(.wire, .socket, .pathRow) {
+  --wire: var(--yes);
+}
+[data-port="no"]:is(.wire, .socket, .pathRow) {
+  --wire: var(--no);
+}
+.socket > span,
+.pathHead > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--wire, var(--muted-foreground));
+  font-weight: 650;
+}
+.socket :global(.react-flow__handle) {
+  background: var(--wire, var(--tone));
+}
+.inspector {
+  gap: 1rem;
+  padding: 1.1rem;
+}
+.stepHeading {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.stepType {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--tone);
+  font-size: 11px;
+  font-weight: 650;
+}
+.stepHeading h2 {
+  font-size: clamp(17px, 1.5vw, 22px);
+  line-height: 1.2;
+  font-weight: 650;
+  margin: 10px 0 6px;
+  overflow-wrap: anywhere;
+}
+.stepHeading p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+.expression {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.expression code {
+  background: color-mix(in srgb, var(--tone) 9%, var(--background));
+  color: var(--foreground);
+  border-radius: 4px;
+  padding: 1px 5px;
+  overflow-wrap: anywhere;
+}
+.stepHeading > button,
+.removeStep {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.settings,
+.pathGroup,
+.pathChoices,
+.outline > div {
+  display: grid;
+  gap: 8px;
+}
+.pathGroup h3 {
+  font-size: 12px;
+  font-weight: 650;
+}
+.pathRow {
+  --wire: var(--muted-foreground);
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--wire);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--wire) 4%, var(--background));
+}
+.pathRow[data-port="no"] {
+  border-left-style: dashed;
+}
+.pathHead,
+.destination,
+.pathChoices button,
+.outline summary,
+.outline button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.pathHead {
+  justify-content: space-between;
+  font-size: 11px;
+}
+.pathHead button {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  border-radius: 5px;
+  color: var(--muted-foreground);
+}
+.destination {
+  width: 100%;
+  padding: 4px 0;
+  text-align: left;
+  font-size: 13px;
+}
+.destination strong {
+  flex: 1;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.destination svg,
+.outline svg {
+  flex: none;
+}
+.destination:disabled {
+  opacity: 0.6;
+}
+.pathHead button:hover,
+.pathChoices button:hover,
+.outline button:hover {
+  background: var(--muted);
+}
+.destination:hover:enabled strong,
+.stepHeading > button:hover,
+.removeStep:hover {
+  text-decoration: underline;
+}
+.pathChoices {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 5px;
+  gap: 2px;
+}
+.pathChoices button,
+.outline button {
+  padding: 5px;
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: left;
+}
+.pathChoices [aria-pressed="true"],
+.outline [aria-current="step"] {
+  font-weight: 650;
+  background: var(--muted);
+}
+.outline summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  list-style: none;
+}
+.outline summary::-webkit-details-marker {
+  display: none;
+}
+.outline summary span {
+  margin-left: auto;
+  color: var(--muted-foreground);
+}
+.outline > div {
+  gap: 1px;
+  margin-top: 7px;
+}
+.choices {
+  min-width: 0;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.choices legend {
+  font-size: 0.78rem;
+  margin-bottom: 4px;
+}
+.choices > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 3px;
+  background: var(--muted);
+  border-radius: 7px;
+}
+.choices label {
+  flex: 1;
+  position: relative;
+  display: block;
+  cursor: pointer;
+}
+.choices input[type="radio"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  margin: 0;
+  cursor: pointer;
+  opacity: 0;
+  padding: 0;
+}
+.choices span {
+  display: block;
+  text-align: center;
+  font-size: 11px;
+  padding: 4px;
+  border-radius: 5px;
+}
+.choices input:checked + span {
+  background: var(--background);
+  font-weight: 650;
+  box-shadow: 0 1px 4px #0002;
+}
+.choices input:focus-visible + span {
+  outline: 2px solid var(--ring);
 }
