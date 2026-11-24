@@ -44,6 +44,8 @@ export interface WorkflowsSearch extends WorkflowPaneState {
   readonly run?: string;
   /** Show the definition files instead of the runs: all of them, or `file` in the editor. */
   readonly definitions?: boolean;
+  readonly visual?: boolean;
+  readonly project?: string;
   readonly file?: string;
 }
 
@@ -117,8 +119,15 @@ export function WorkflowsPage() {
       });
   };
   // The run stays in the address, so the breadcrumb back to the runs reopens it.
-  const openDefinitions = (file: string | null) =>
-    go({ ...env, ...run, definitions: true, ...(file === null ? {} : { file }) });
+  const openDefinitions = (file: string | null, visual = false) =>
+    go({
+      ...env,
+      ...run,
+      ...(search.project ? { project: search.project } : {}),
+      ...(visual ? { visual: true } : {}),
+      definitions: true,
+      ...(file === null ? {} : { file }),
+    });
   // What is open beside the run, which belongs to the run: picking another one closes it.
   const pane: WorkflowPaneState =
     environmentId === null || editing || search.pane === undefined
@@ -259,6 +268,8 @@ export function WorkflowsPage() {
                 environmentId={fileEnvironmentId}
                 file={search.file ?? null}
                 away={away}
+                projectId={search.project ?? null}
+                visual={search.visual === true}
                 onOpen={openDefinitions}
                 actions={fileActions}
               />

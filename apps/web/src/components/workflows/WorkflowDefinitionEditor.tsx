@@ -7,10 +7,12 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { useBlocker } from "@tanstack/react-router";
+import { Link, useBlocker } from "@tanstack/react-router";
 import { T, useGT, Var } from "gt-react";
 import { FileCode2Icon, PlusIcon } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useProjects, useServerConfigs } from "~/state/entities";
+import { readCanvas } from "@t3tools/shared/it3WorkflowGraph";
+import { lazy, Suspense, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 
 import { requestConfirmDialog } from "../../confirmDialog";
@@ -28,6 +30,7 @@ import { Input } from "../ui/input";
 import { type DiskChange, diskChange, staleAfterSave } from "./WorkflowDefinitionEditor.logic";
 import { WorkflowsEmpty } from "./WorkflowRunsView";
 
+const WorkflowCanvas = lazy(() => import("../../it3/workflows/WorkflowCanvas"));
 type DefinitionEditor = Editor<"file", undefined, undefined>;
 const createEditor: EditorFactory<undefined, undefined> = (editorType, options, editStateKey) =>
   new Editor(editorType, options, editStateKey);
@@ -346,6 +349,8 @@ export default function WorkflowDefinitionEditor({
   environmentId,
   file,
   away,
+  projectId,
+  visual,
   onOpen,
   actions,
 }: {
@@ -353,7 +358,9 @@ export default function WorkflowDefinitionEditor({
   readonly file: string | null;
   /** The environment's name while it is not connected. */
   readonly away: string | null;
-  readonly onOpen: (file: string | null) => void;
+  readonly projectId: string | null;
+  readonly visual: boolean;
+  readonly onOpen: (file: string | null, visual?: boolean) => void;
   readonly actions: HTMLElement | null;
 }) {
   const query = useEnvironmentQuery(
@@ -365,7 +372,14 @@ export default function WorkflowDefinitionEditor({
   const remove = useAtomCommand(serverEnvironment.deleteWorkflowDefinition, {
     label: "workflow definition delete",
   });
+  const project = useProjects().find(
+    (p) => p.id === projectId && p.environmentId === environmentId,
+  );
+  const supported =
+    useServerConfigs().get(environmentId)?.environment.capabilities.it3WorkflowCanvas === true;
   const gt = useGT();
+  const [newCanvas, setNewCanvas] = useState(false);
+  const [nameError, setNameError] = useState("");
   const [naming, setNaming] = useState<string | null>(null);
   // What the last delete said, on the page it belongs to: the file, or the list once it is gone.
   const [refusal, setRefusal] = useState<{
@@ -397,13 +411,27 @@ export default function WorkflowDefinitionEditor({
     );
   }
   const { directory, single, files, problems, revision } = query.data;
-  const open = (next: string | null) => {
+  const open = (next: string | null, asCanvas = false) => {
     setRefusal(null);
-    onOpen(next);
+    onOpen(next, asCanvas);
   };
   const begin = () => {
     const wanted = (naming ?? "").trim();
     if (wanted === "") return;
+    if (newCanvas) {
+      if (!/^[a-z][a-z0-9-]{0,79}$/.test(wanted)) {
+        setNameError(gt("Use a lowercase name with letters, numbers and hyphens."));
+        return;
+      }
+      const name = wanted + ".flow.ts";
+      if (files.some((f) => f.name === name)) {
+        setNameError(gt("That workflow file already exists."));
+        return;
+      }
+      setNaming(null);
+      open(name, true);
+      return;
+    }
     setNaming(null);
     open(/\.(ts|mts|js|mjs)$/.test(wanted) ? wanted : `${wanted}.ts`);
   };
@@ -465,6 +493,33 @@ export default function WorkflowDefinitionEditor({
 
   if (file !== null) {
     const shown = files.find((candidate) => candidate.name === file) ?? null;
+    if (supported && visual && /^[a-z][a-z0-9-]{0,79}\.flow\.ts$/.test(file)) {
+      return (
+        <div className="flex min-h-0 flex-1 flex-col">
+          {between}
+          <Suspense
+            fallback={
+              <p>
+                <T>Loading canvas…</T>
+              </p>
+            }
+          >
+            <WorkflowCanvas
+              key={file}
+              env={environmentId}
+              file={file}
+              source={shown?.source ?? null}
+              projectId={projectId}
+              writable={canChange}
+              offline={away !== null || !!query.error}
+              onSource={() => open(file)}
+              onDeleted={() => open(null)}
+              onDelete={single || !shown ? undefined : () => removeFile(file)}
+            />
+          </Suspense>
+        </div>
+      );
+    }
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         {between}
@@ -488,26 +543,64 @@ export default function WorkflowDefinitionEditor({
     );
   }
 
+  const listed = projectId
+    ? files.filter((f) => readCanvas(f.source)?.projectId === projectId)
+    : files;
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {between}
       <div className="scrollbar-gutter-both min-h-0 flex-1 overflow-auto">
         <div className="mx-auto w-full max-w-3xl space-y-3 p-4 sm:p-6">
           <div className="flex items-start gap-3">
-            <p className="min-w-0 flex-1 text-xs text-muted-foreground">
-              <T>
-                Every file in{" "}
-                <code className="font-mono text-foreground">
-                  <Var>{directory}</Var>
-                </code>{" "}
-                defines workflows. A change to one is picked up without a restart.
-              </T>
-            </p>
+            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+              {projectId ? (
+                <Link
+                  to="/workspaces"
+                  search={{ env: environmentId, project: projectId, view: "agents" }}
+                  className="underline"
+                >
+                  {project?.title ?? gt("Project home")}
+                </Link>
+              ) : (
+                <T>
+                  Every file in{" "}
+                  <code className="font-mono text-foreground">
+                    <Var>{directory}</Var>
+                  </code>{" "}
+                  defines workflows. A change to one is picked up without a restart.
+                </T>
+              )}
+            </div>
             {single || !canChange ? null : naming === null ? (
-              <Button size="sm" variant="outline" onClick={() => setNaming("")}>
-                <PlusIcon />
-                <T>New file</T>
-              </Button>
+              <>
+                {supported && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setNewCanvas(true);
+                      setNameError("");
+                      setNaming("");
+                    }}
+                  >
+                    <PlusIcon />
+                    <T>New visual workflow</T>
+                  </Button>
+                )}
+                {!projectId && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setNewCanvas(false);
+                      setNameError("");
+                      setNaming("");
+                    }}
+                  >
+                    <PlusIcon />
+                    <T>New file</T>
+                  </Button>
+                )}
+              </>
             ) : (
               <form
                 className="flex shrink-0 items-center gap-1"
@@ -520,7 +613,7 @@ export default function WorkflowDefinitionEditor({
                   autoFocus
                   size="sm"
                   aria-label={gt("File name")}
-                  placeholder="release.ts"
+                  placeholder={newCanvas ? "suite-review" : "release.ts"}
                   value={naming}
                   onChange={(event) => setNaming(event.target.value)}
                   onKeyDown={(event) => {
@@ -533,7 +626,8 @@ export default function WorkflowDefinitionEditor({
               </form>
             )}
           </div>
-          {files.length === 0 ? (
+          {nameError && naming !== null && <p role="alert">{nameError}</p>}
+          {listed.length === 0 ? (
             <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
               <T>
                 No workflows yet. Make the first file here, or ask an agent to write one in that
@@ -542,12 +636,19 @@ export default function WorkflowDefinitionEditor({
             </p>
           ) : (
             <ul className="divide-y rounded-lg border">
-              {files.map((candidate) => (
+              {listed.map((candidate) => (
                 <li key={candidate.name}>
                   <button
                     type="button"
                     className="flex w-full items-center gap-3 px-3 py-2.5 text-start hover:bg-accent/50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                    onClick={() => open(candidate.name)}
+                    onClick={() =>
+                      open(
+                        candidate.name,
+                        supported &&
+                          candidate.name.endsWith(".flow.ts") &&
+                          readCanvas(candidate.source) !== null,
+                      )
+                    }
                   >
                     <FileCode2Icon className="size-4 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1">

@@ -279,6 +279,7 @@ export const make = Effect.gen(function* () {
       projectCloneTracking: true,
       projectOrganization: true,
       it3Workspaces: true,
+      it3WorkflowCanvas: true,
       it3QueuePreview: true,
       it3Tasks: true,
       it3AgentView: true,

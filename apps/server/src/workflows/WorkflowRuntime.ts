@@ -72,7 +72,11 @@ export class WorkflowDefinitions extends Context.Service<
      * Verify `source` as the file `name`, and when nothing is wrong write it and run it from now
      * on. A file that was written can still fail to run, and then says why.
      */
-    readonly save: (name: string, source: string) => Effect.Effect<WorkflowDefinitionChangeResult>;
+    readonly save: (
+      name: string,
+      source: string,
+      expectedSource?: string | null,
+    ) => Effect.Effect<WorkflowDefinitionChangeResult>;
     /** Take a file away, unless runs still need what it defines. */
     readonly remove: (name: string) => Effect.Effect<WorkflowDefinitionChangeResult>;
   }
@@ -690,7 +694,11 @@ export const make = Effect.fn("WorkflowRuntime.make")(function* <E, R>(
     };
   });
 
-  const save = Effect.fn("WorkflowRuntime.save")(function* (name: string, source: string) {
+  const save = Effect.fn("WorkflowRuntime.save")(function* (
+    name: string,
+    source: string,
+    expectedSource?: string | null,
+  ) {
     const no = refused(name);
     if (no !== undefined) return refusal([no]);
     const file = path.join(directory, name);
@@ -710,6 +718,16 @@ export const make = Effect.fn("WorkflowRuntime.make")(function* <E, R>(
     const definitions = checked.definitions;
     const problems = yield* wouldBreak((files) => files.set(name, definitions));
     if (problems.length > 0) return refusal(problems);
+    // Checked under the definition lock after validation, immediately before publishing.
+    if (expectedSource !== undefined) {
+      const disk = yield* fileSystem.readFileString(file).pipe(Effect.result);
+      const matches =
+        disk._tag === "Success"
+          ? disk.success === expectedSource
+          : disk.failure.reason._tag === "NotFound" && expectedSource === null;
+      if (!matches)
+        return refusal([{ message: "The workflow file changed. Reload it before publishing." }]);
+    }
     const written = yield* fileSystem.writeFileString(file, source).pipe(Effect.result);
     if (written._tag === "Failure") {
       return refusal([{ message: `Could not write ${file}: ${text(written.failure)}` }]);
@@ -760,8 +778,8 @@ export const make = Effect.fn("WorkflowRuntime.make")(function* <E, R>(
             .flatMap(([, problems]) => problems);
           return { directory, single, files, problems: [...misnamed, ...between, ...gone], ...at };
         }),
-        save: Effect.fn("WorkflowDefinitions.save")(function* (name, source) {
-          return yield* lock.withPermits(1)(save(name, source));
+        save: Effect.fn("WorkflowDefinitions.save")(function* (name, source, expectedSource) {
+          return yield* lock.withPermits(1)(save(name, source, expectedSource));
         }),
         remove: Effect.fn("WorkflowDefinitions.remove")(function* (name) {
           return yield* lock.withPermits(1)(remove(name));
@@ -920,8 +938,8 @@ export const gate = Effect.fn("WorkflowRuntime.gate")(function* <E, R>(
         WorkflowDefinitions,
         WorkflowDefinitions.of({
           read: Effect.flatMap(definitions, (files) => files.read),
-          save: Effect.fn("WorkflowDefinitions.save")(function* (name, source) {
-            return yield* (yield* definitions).save(name, source);
+          save: Effect.fn("WorkflowDefinitions.save")(function* (name, source, expectedSource) {
+            return yield* (yield* definitions).save(name, source, expectedSource);
           }),
           remove: Effect.fn("WorkflowDefinitions.remove")(function* (name) {
             return yield* (yield* definitions).remove(name);

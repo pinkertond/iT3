@@ -134,6 +134,7 @@ export type WorkflowDefinitionFiles = typeof WorkflowDefinitionFiles.Type;
 export const WorkflowDefinitionGetInput = Schema.Struct({});
 /** A file by its name in the folder. Saving a name that is not there yet makes the file. */
 export const WorkflowDefinitionSaveInput = Schema.Struct({
+  expectedSource: Schema.optionalKey(Schema.NullOr(Schema.String)),
   name: Schema.String,
   source: Schema.String,
 });

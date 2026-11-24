@@ -8,6 +8,14 @@ For one prompt on a timer or webhook, use a scheduled task. Use a workflow when 
 
 Workflows are a Labs feature, off by default. Turn on **Settings → Labs → Workflows** for the server that runs them. On a server without a desktop, set `"workflowsEnabled": true` in `userdata/settings.json` in its T3 home (`~/.t3` by default). While off, nothing in the workflows folder runs and `t3 workflow` says how to turn it on; runs are kept and continue once it is on again.
 
+## Build a visual workflow in iT3
+
+Open **Workspaces → project → Workflows → New visual workflow**. Give the definition a lowercase name and choose **Create**. The initial graph takes a suite report, checks completeness, branches on failed tests and can ask a person whether to prepare a diagnosis brief. Each path runs locally on the host and uses zero model calls.
+
+Select a node to edit it. Drag between handles or use the inspector’s destination menus to connect it. **Publish** becomes available once every output has a destination and every node is reachable. **Run workflow** accepts the sample or your own JSON report. Use **Open native run** for a pending question. Select a visited node to inspect its result and evidence. **Inspect a previous run** reopens a recorded execution.
+
+The host saves a project-linked `<name>.flow.ts` file in the directory shown under **Definitions**. Two clients connected to the same host see its saved definitions. A semantic edit adds a version, and moving nodes only updates the layout. If another editor publishes first, reload the saved version before applying your changes. See [Visual project workflows](../design/agent-system/workflow-canvas.md) for the file format and supported nodes.
+
 ## Create a workflow
 
 Workflow files live in `~/.t3/workflows/` (or wherever `T3CODE_WORKFLOWS` points — a folder or a single file). The server watches the folder and reloads changes without a restart.

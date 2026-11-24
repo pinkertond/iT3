@@ -1986,6 +1986,10 @@ export function createServerEnvironmentAtoms<R, E>(
       concurrency: workflowRunConcurrency,
     }),
     // Saves and deletes of one file go one after another: each carries its own text.
+    it3StartWorkflow: createEnvironmentRpcCommand(runtime, {
+      label: "it3:workflows:start",
+      tag: WS_METHODS.it3StartWorkflow,
+    }),
     saveWorkflowDefinition: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:workflows:save-definition",
       tag: WS_METHODS.workflowsSaveDefinition,

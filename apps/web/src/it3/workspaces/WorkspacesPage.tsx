@@ -401,6 +401,8 @@ function ProjectHome({
     : tree.roots.length === 1
       ? tree.roots[0]
       : undefined;
+  const canvasSupported =
+    useServerConfigs().get(p.environmentId)?.environment.capabilities.it3WorkflowCanvas === true;
   const queueSupported =
     useServerConfigs().get(p.environmentId)?.environment.capabilities.it3QueuePreview === true;
   const taskSupported =
@@ -544,6 +546,11 @@ function ProjectHome({
             {label}
           </button>
         ))}
+        {canvasSupported && (
+          <Link to="/workflows" search={{ env: p.environmentId, project: p.id, definitions: true }}>
+            <T>Workflows</T>
+          </Link>
+        )}
       </nav>
       {view === "tasks" ? (
         taskSupported ? (

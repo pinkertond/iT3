@@ -164,6 +164,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   projectCloneTracking: Schema.optionalKey(Schema.Boolean),
   /** Server keeps `pinned` and `archived` from project.update. Older servers drop them. */
   projectOrganization: Schema.optionalKey(Schema.Boolean),
+  it3WorkflowCanvas: Schema.optionalKey(Schema.Boolean),
   it3QueuePreview: Schema.optionalKey(Schema.Boolean),
   it3Tasks: Schema.optionalKey(Schema.Boolean),
   it3AgentView: Schema.optionalKey(Schema.Boolean),

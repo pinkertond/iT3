@@ -56,3 +56,9 @@ Interrupted-work recovery reuses the native checkpoint store, Git driver and thr
 ## Host queue preview
 
 The preview shares the task ledger and project placement settings. The fork owns the ranking logic in `apps/server/src/it3/queuePreview.ts`, the queue forms in the project-home renderer, and the `it3Queue.ts` contract. During an upstream update, verify the optional capability, WebSocket and client query registrations, dual read scopes, the settings patch and the new operator-only task edit. Exercise the same shared-account reserve against two active projects, and change one project to paused. Check the local-usage and provider-window field semantics again if either upstream schema changes.
+
+## Visual workflow editor
+
+The fork owns the graph format, validator, native source emitter and browser editor in `packages/shared/src/it3WorkflowGraph.ts` and `apps/web/src/it3/workflows/`. Replay the shared package export, web React Flow dependency and lockfile, workflow route search fields, Definitions entry, project-home link and translation catalogs during an upstream update.
+
+The host adapter adds an optional canvas capability, a terminal-scoped start RPC, its client command and instrumentation, and an optional expected-source precondition on the existing save RPC. Reconcile the registrations in contracts, server environment, WebSocket handlers, client runtime and the locked save in `WorkflowRuntime.ts`. Retire the mounts when upstream offers project-linked editable graphs, versioned starts and equivalent concurrency protection. Replay the canvas browser test and the SQLite restart and competing-publish tests on each rebase.

@@ -642,6 +642,7 @@ export const WS_METHODS = {
   workflowsCounts: "workflows.counts",
   workflowsGet: "workflows.get",
   workflowsAnswer: "workflows.answer",
+  it3StartWorkflow: "it3.startWorkflow",
   workflowsResume: "workflows.resume",
   workflowsCancel: "workflows.cancel",
   workflowsGetDefinition: "workflows.getDefinition",
@@ -2357,6 +2358,18 @@ const WsWorkflowsAnswerRpc = Rpc.make(WS_METHODS.workflowsAnswer, {
   error: Schema.Union([WorkflowRequestError, EnvironmentAuthorizationError]),
 });
 
+const It3StartWorkflowRpc = Rpc.make(WS_METHODS.it3StartWorkflow, {
+  payload: Schema.Struct({
+    name: TrimmedNonEmptyString,
+    file: TrimmedNonEmptyString,
+    expectedSource: Schema.String,
+    version: Schema.Int.check(Schema.isGreaterThan(0)),
+    input: Schema.Json,
+    key: TrimmedNonEmptyString,
+  }),
+  success: Schema.Struct({ runId: Schema.String }),
+  error: Schema.Union([WorkflowRequestError, EnvironmentAuthorizationError]),
+});
 const WsWorkflowsResumeRpc = Rpc.make(WS_METHODS.workflowsResume, {
   payload: WorkflowRunResumeInput,
   error: Schema.Union([WorkflowRequestError, EnvironmentAuthorizationError]),
@@ -2567,6 +2580,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsWorkflowsCountsRpc,
   WsWorkflowsGetRpc,
   WsWorkflowsAnswerRpc,
+  It3StartWorkflowRpc,
   WsWorkflowsResumeRpc,
   WsWorkflowsCancelRpc,
   WsWorkflowsGetDefinitionRpc,

@@ -16,6 +16,15 @@ relations:
 
 # Visual project workflows
 
+**Available in iT3** — Open **Workspaces → project → Workflows → New visual workflow** on a host with **Settings → Labs → Workflows** enabled. Give the workflow a lowercase name and choose **Create**. The canvas opens with six connected nodes.
+
+1. Select a node to see its purpose and edit its label. For a human review, the label is the question the operator sees.
+2. Drag a connection between handles or choose a destination in the inspector. A branch tests for failures or skipped tests. Both Yes and No need a destination. Each graph has one start, up to twelve reachable nodes and no cycles.
+3. Choose **Publish**, then **Run workflow**. Start with the supplied sample or paste a completed suite report. For a failed sample, open **Open native run** and answer the review. Select the result node to read its recorded evidence.
+4. Reopen the definition to inspect an earlier run. Editing a rule publishes a new execution version. Moving a node changes only its layout. A run waiting for an answer keeps its original rules across publishes and host restarts.
+
+## Longer-term project views
+
 Start at one project. Choose **Team**, **Workflows**, or **Runs**. Each view opens one level with up to twelve immediate entries. A larger process can contain named subflows. The inspector holds descriptions, evidence and cross-links so the canvas can stay legible.
 
 | View      | What the operator can see and change                                                                                                                                                                                        |
@@ -26,9 +35,9 @@ Start at one project. Choose **Team**, **Workflows**, or **Runs**. Each view ope
 
 ## One definition for humans and agents
 
-Keep each authored graph in project Git, e.g. `.it3/workflows/suite-review.json`. Define node types, typed ports, stable IDs, version and explicit control edges in a schema. Store layout separately from execution semantics. Use project and environment IDs to resolve resources. Read team bindings from the seat directory, task progress from the ledger, and run history from the native workflow store. A compiled index supplies the generated documentation and project view.
+The host currently stores one `<name>.flow.ts` in its native workflow definitions directory. Its `canvas` JSON contains the project ID, stable node IDs, port connections, semantic revisions and layout. A human and an agent can read the same definition. Agents can edit the JSON while preserving prior revisions and the format's runtime wrapper. Workflows with custom TypeScript open in the native source editor. The project entry filters by project ID. Clients connected to the same host share published definitions and runs.
 
-Give the canvas and agent tools the same operations: read one graph or node, propose a patch against a revision, validate, preview the change, and publish. Validate port compatibility, references, reachability, caller scope and loop bounds. A publish compiles the supported graph to native T3 workflow source and retains versions needed by unfinished runs. Track the generated hash. An independent edit of published source triggers a conflict. Existing hand-authored TypeScript workflows remain accessible in the native source editor. Arbitrary TypeScript cannot reliably round-trip through a graphical editor.
+The editor checks connectivity, ports and cycles before publication. It submits the source it last read so the host can reject stale edits. The native workflow engine stores the run history and journals one step per visited node. A Git-backed project catalog, subflows and focused agent authoring tools are future extensions.
 
 ## Execution and permissions
 
@@ -40,7 +49,7 @@ Agent nodes resolve the named seat to its current occupant and check the binding
 
 **Test suite → summarize → branch → human review → diagnosis brief.** A deterministic runner emits a revision, completeness flag, individual outcomes and an evidence reference. Compute the summary locally. Passing runs finish with zero model calls. Empty and incomplete reports stay visible. A failure offers a bounded diagnosis brief with three example failures and a link to the complete report. Later, a permitted and budgeted agent can claim that brief.
 
-The [native example](../../../it3/extensions/workflows/examples/suite-review.ts) starts from a completed suite report. It exposes the durable human review through T3 Workflows. The suite runner, canvas and automatic agent dispatch are separate delivery items.
+The [native example](../../../it3/extensions/workflows/examples/suite-review.ts) starts from a completed suite report. It exposes the durable human review through T3 Workflows. The visual template accepts the same input shape. Invoking a test runner and dispatching a diagnosis agent are future node types.
 
 ### Try the example
 
@@ -63,6 +72,6 @@ Open **Workflows → Needs you** to see the review. **Prepare diagnosis brief** 
 
 ## Technology and upstream boundary
 
-Build the editor as a fork-owned project-home contribution. Use React Flow for the graph and Vercel AI SDK UI for streamed authoring suggestions where useful. Vercel's Workflow Builder is a visual reference. T3's Effect workflow engine already runs on the host. Use its existing definitions, version handling, SQLite journal and chat links through a narrow adapter. Track any required registration in the [upstream exception register](upstream-exceptions.md).
+The editor uses React Flow and loads when a visual definition opens. A future authoring assistant can stream suggestions through Vercel AI SDK UI. Vercel's Workflow Builder is a visual reference. T3's Effect workflow engine already runs on the host. Use its existing definitions, version handling, SQLite journal and chat links through a narrow adapter. Track any required registration in the [upstream exception register](upstream-exceptions.md).
 
 [Native T3 Workflows](../../user/workflows.md) · [Project seats](tasks/03-seats.md) · [Active-project queue](active-project-loop.md) · [Vercel Workflow Builder](https://vercel.com/templates/next.js/workflow-builder) · [n8n license](https://github.com/n8n-io/n8n/blob/master/LICENSE.md)

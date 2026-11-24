@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./it3WorkflowGraph": {
+      "types": "./src/it3WorkflowGraph.ts",
+      "import": "./src/it3WorkflowGraph.ts"
+    },
     "./png": {
       "types": "./src/png.ts",
       "import": "./src/png.ts"

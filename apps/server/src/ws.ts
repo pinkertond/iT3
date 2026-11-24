@@ -1,3 +1,4 @@
+import { readCanvas } from "@t3tools/shared/it3WorkflowGraph";
 import { taskCheckouts } from "./it3/taskRecovery.ts";
 import { CheckpointStore } from "./checkpointing/CheckpointStore.ts";
 import { handleTaskWrite } from "./it3/taskHandoff.ts";
@@ -2391,13 +2392,36 @@ export const layerWsRpc = (
               ...(input.reason === undefined ? {} : { reason: input.reason }),
             })
             .pipe(Effect.mapError(toWorkflowRequestError)),
+        [WS_METHODS.it3StartWorkflow]: Effect.fn("it3.startWorkflow")(function* (input) {
+          const snapshot = yield* workflowDefinitions.read;
+          const file = snapshot.files.find(
+            (f) => f.name === input.file && f.workflows.includes(input.name + "@" + input.version),
+          );
+          const doc = file && readCanvas(file.source);
+          if (
+            !file ||
+            !doc ||
+            doc.name !== input.name ||
+            file.source !== input.expectedSource ||
+            file.problems.length ||
+            snapshot.problems.length
+          ) {
+            return yield* new WorkflowRequestError({
+              message:
+                "The published workflow changed or could not load. Refresh the definition before starting.",
+            });
+          }
+          return yield* workflows
+            .start(input.name, input.input, { idempotencyKey: input.key, version: input.version })
+            .pipe(Effect.mapError(toWorkflowRequestError));
+        }),
         [WS_METHODS.workflowsResume]: (input) =>
           workflows.resume(input.runId).pipe(Effect.mapError(toWorkflowRequestError)),
         [WS_METHODS.workflowsCancel]: (input) =>
           workflows.cancel(input.runId, input.reason).pipe(Effect.mapError(toWorkflowRequestError)),
         [WS_METHODS.workflowsGetDefinition]: (_input) => workflowDefinitions.read,
         [WS_METHODS.workflowsSaveDefinition]: (input) =>
-          workflowDefinitions.save(input.name, input.source),
+          workflowDefinitions.save(input.name, input.source, input.expectedSource),
         [WS_METHODS.workflowsDeleteDefinition]: (input) => workflowDefinitions.remove(input.name),
         [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
           scheduledTasks.subscribeList().pipe(Stream.map(withVisibleWebhookUrls)),

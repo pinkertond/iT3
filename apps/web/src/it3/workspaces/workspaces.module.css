@@ -91,6 +91,7 @@
 .iw :is(select, input),
 .iw-action,
 .iw-form button,
+.iw-tabs a,
 .iw-tabs button,
 .iw-pager button {
   background: var(--background);
