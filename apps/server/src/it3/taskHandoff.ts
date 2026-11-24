@@ -202,7 +202,7 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
       commandId: CommandId.make("it3-task-" + receipt),
       threadId: target,
       messageId: MessageId.make("it3-task-" + receipt),
-      text: `Assigned iT3 task. Call t3_task_brief with this exact input: {"key":"${edit.key}","attempt":${a.number}}. Expected generation ${a.generation}. If its owner, attempt and generation still match this notice, use t3_task_update to claim it, declare intended files, review recovery.changes as unverified working files, verify the checkpoint and continue. Save progress after each subtask.`,
+      text: `Assigned iT3 task. Call t3_task_brief with this exact input: {"key":"${edit.key}","attempt":${a.number}}. Expected generation ${a.generation}. The host authenticates this chat. If assignedToThisChat includes ${a.number} and the generation matches, call t3_task_update now with action "claim", intended files and next action. A stage of "assigned" reserves the attempt for you. After claiming, review recovery.changes as unverified files, verify the checkpoint and continue. Save progress after each subtask.`,
       attachments: [],
       mode: "queue",
       createdBy: "system",

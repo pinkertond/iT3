@@ -204,7 +204,10 @@ const TaskBriefTool = Tool.make("t3_task_brief", {
     key: TrimmedNonEmptyString,
     attempt: Schema.optionalKey(Schema.Literals([1, 2])),
   }),
-  success: TaskBrief,
+  success: Schema.Struct({
+    ...TaskBrief.fields,
+    assignedToThisChat: Schema.Array(Schema.Literals([1, 2])),
+  }),
   dependencies: [...shared.dependencies, ServerConfig.ServerConfig],
 })
   .annotate(Tool.Readonly, true)

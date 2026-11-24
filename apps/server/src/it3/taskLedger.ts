@@ -68,12 +68,15 @@ export function readTaskBrief(
     const db = connect(directory, true);
     try {
       const task = lookup(db, project, key) ?? refuse("Task does not exist in this project.");
-      if (!task.comparison) return task;
+      const assignedToThisChat = task.attempts
+        .filter((a) => a.owner === worker && a.stage === "assigned")
+        .map((a) => a.number);
+      if (!task.comparison) return { ...task, assignedToThisChat };
       const n = number ?? task.attempts.find((a) => a.owner === worker)?.number;
       const own = task.attempts.find((a) => a.number === n);
       if (!own || (own.owner && own.owner !== worker))
         return refuse("Read your assigned comparison attempt.");
-      return { ...task, attempts: [own] };
+      return { ...task, attempts: [own], assignedToThisChat };
     } finally {
       db.close();
     }

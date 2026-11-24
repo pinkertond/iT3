@@ -5,12 +5,12 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import { expect, it } from "@effect/vitest";
 import { ThreadId, type TaskBrief, type TaskEdit } from "@t3tools/contracts";
-import { readTask, writeTask, type TaskActor } from "./taskLedger.ts";
+import { readTaskBrief, readTask, writeTask, type TaskActor } from "./taskLedger.ts";
 
 function fixture() {
   const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "it3-task-"));
   const operator: TaskActor = { kind: "operator", id: "operator" };
-  const worker = (id: string, worktree: string | null): TaskActor => ({
+  const worker = (id: string, worktree: string | null): Extract<TaskActor, { kind: "worker" }> => ({
     kind: "worker",
     id: ThreadId.make(id),
     title: id,
@@ -100,6 +100,8 @@ it.effect(
         f.operator,
         checked,
       );
+      expect((yield* readTaskBrief(f.dir, "project", "T", f.b.id)).assignedToThisChat).toEqual([1]);
+      expect((yield* readTaskBrief(f.dir, "project", "T", f.a.id)).assignedToThisChat).toEqual([]);
       expect((yield* Effect.flip(f.send(f.check, f.a, checked))).detail).toMatch(/stale/);
       expect((yield* Effect.flip(f.send(f.check, f.a, assigned))).detail).toMatch(/current worker/);
       expect((yield* Effect.flip(f.send(f.claim, f.b, assigned))).detail).toMatch(/worktree/);
