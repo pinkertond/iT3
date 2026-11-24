@@ -1,0 +1,194 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "iT3 agent system proposal",
+    "quality_profile": "showcase",
+    "output": "agent-architecture.html",
+    "repository": {
+      "url": "https://github.com/pinkertond/iT3.git",
+      "revision": "c76d03438d4dba7d30c692cd8f8d90405ebd8bdf",
+      "link_mode": "local-only"
+    }
+  },
+  "components": [
+    {
+      "id": "roster",
+      "type": "frontend",
+      "label": "Project roster",
+      "sublabel": "Two paired clients",
+      "pos": [
+        45,
+        55
+      ],
+      "size": [
+        165,
+        70
+      ],
+      "sources": [
+        {
+          "path": "docs/design/agent-system/specification.md",
+          "line": 52
+        }
+      ]
+    },
+    {
+      "id": "host",
+      "type": "security",
+      "label": "Extension host",
+      "sublabel": "Manifest and caller scope",
+      "pos": [
+        355,
+        55
+      ],
+      "size": [
+        165,
+        70
+      ],
+      "sources": [
+        {
+          "path": "docs/design/agent-system/specification.md",
+          "line": 53
+        }
+      ]
+    },
+    {
+      "id": "agents",
+      "type": "backend",
+      "label": "Agent extension",
+      "sublabel": "Seat and generation rules",
+      "pos": [
+        680,
+        55
+      ],
+      "size": [
+        165,
+        70
+      ],
+      "sources": [
+        {
+          "path": "docs/design/agent-system/specification.md",
+          "line": 54
+        }
+      ]
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "Extension store",
+      "sublabel": "Bindings, outbox, receipts",
+      "pos": [
+        680,
+        260
+      ],
+      "size": [
+        165,
+        70
+      ],
+      "sources": [
+        {
+          "path": "docs/design/agent-system/specification.md",
+          "line": 56
+        }
+      ]
+    },
+    {
+      "id": "adapter",
+      "type": "backend",
+      "label": "T3 adapter",
+      "sublabel": "Recheck caller and target",
+      "pos": [
+        355,
+        260
+      ],
+      "size": [
+        165,
+        70
+      ],
+      "sources": [
+        {
+          "path": "docs/design/agent-system/specification.md",
+          "line": 55
+        }
+      ]
+    },
+    {
+      "id": "thread",
+      "type": "backend",
+      "label": "T3 thread",
+      "sublabel": "Native transcript and run",
+      "pos": [
+        45,
+        260
+      ],
+      "size": [
+        165,
+        70
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/mcp/toolkits/orchestrator/handlers.ts",
+          "line": 177
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "select",
+      "from": "roster",
+      "to": "host",
+      "label": "select seat"
+    },
+    {
+      "id": "admit",
+      "from": "host",
+      "to": "agents",
+      "label": "authorized call"
+    },
+    {
+      "id": "commit",
+      "from": "agents",
+      "to": "store",
+      "label": "persist handoff"
+    },
+    {
+      "id": "deliver",
+      "from": "store",
+      "to": "adapter",
+      "label": "pending delivery"
+    },
+    {
+      "id": "send",
+      "from": "adapter",
+      "to": "thread",
+      "label": "queue message"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Named seats",
+      "items": [
+        "Thread IDs identify the occupant.",
+        "A new binding increments the generation."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Delivery and reply",
+      "items": [
+        "Retry with the same request key.",
+        "An explicit reply records acknowledgement."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Upstream compatibility",
+      "items": [
+        "The adapter owns T3 integration.",
+        "A stock host keeps native chats usable."
+      ]
+    }
+  ]
+}
