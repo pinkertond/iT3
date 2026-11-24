@@ -14,6 +14,8 @@ vi.mock("~/state/server", () => ({
 vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => mutate }));
 vi.mock("~/components/files/projectFilesQueryState", () => ({ useProjectFileQuery: () => ({}) }));
 vi.mock("./ProjectUsage", () => ({ BranchUsage: () => null }));
+vi.mock("~/state/environments", () => ({ useEnvironmentProviders: () => new Map() }));
+
 const p = {
   id: ProjectId.make("p"),
   environmentId: EnvironmentId.make("e"),
@@ -123,6 +125,63 @@ it("shows the checkpoint above details and hands off using the displayed generat
           generation: 4,
           revision: 6,
           change: { action: "handoff", target: "new", next: "Verify one, then write two" },
+        }),
+      }),
+    }),
+  );
+});
+it("saves a deterministic queue step against the displayed revision", async () => {
+  query.mockReturnValue({
+    data: {
+      tasks: [],
+      brief: {
+        key: "T",
+        title: "Index",
+        request: "Check index",
+        comparison: false,
+        accepted: null,
+        reference: "",
+        attempts: [
+          {
+            number: 1,
+            generation: 0,
+            revision: 3,
+            stage: "ready",
+            files: [],
+            steps: [],
+            delivery: "none",
+            checkpoint: "",
+            next: "",
+            verification: "",
+          },
+        ],
+      },
+      events: [],
+      contributors: [],
+      more: false,
+    },
+    refresh: vi.fn(),
+  });
+  await using screen = await render(
+    <TaskBoard project={p} threads={[]} selected="T" queueSupported onSelect={() => {}} />,
+  );
+  await screen.getByText("Queue step", { exact: true }).click();
+  await screen.getByLabelText("Next step", { exact: true }).fill("Run index check");
+  await screen.getByLabelText("Completion check", { exact: true }).fill("All indexes pass");
+  await screen.getByRole("button", { name: "Save queue step" }).click();
+  expect(mutate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: expect.objectContaining({
+        edit: expect.objectContaining({
+          revision: 3,
+          change: {
+            action: "plan",
+            step: expect.objectContaining({
+              route: "check",
+              next: "Run index check",
+              inputTokens: 0,
+            }),
+          },
         }),
       }),
     }),

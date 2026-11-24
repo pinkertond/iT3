@@ -5,7 +5,13 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import { expect, it } from "@effect/vitest";
 import { ThreadId, type TaskBrief, type TaskEdit } from "@t3tools/contracts";
-import { readTaskBrief, readTask, writeTask, type TaskActor } from "./taskLedger.ts";
+import {
+  readQueueAttempts,
+  readTaskBrief,
+  readTask,
+  writeTask,
+  type TaskActor,
+} from "./taskLedger.ts";
 
 function fixture() {
   const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "it3-task-"));
@@ -143,4 +149,41 @@ it.effect("keeps parallel attempts isolated and records the operator's single wi
       /stale/,
     );
   }),
+);
+
+it.effect(
+  "reads legacy and planned candidates without mutating the ledger and fences stage edits",
+  () =>
+    Effect.gen(function* () {
+      using f = fixture();
+      expect(yield* readQueueAttempts(f.dir)).toEqual([]);
+      expect(NodeFS.readdirSync(f.dir)).toEqual([]);
+      const original = yield* f.create(true);
+      expect((yield* readQueueAttempts(f.dir)).map((a) => a.step)).toEqual([null, null]);
+      const step = {
+        route: "check",
+        next: "Compare",
+        verification: "Diff passes",
+        priority: null,
+        dependencies: ["needs-acceptance"],
+        inputTokens: 0,
+        outputTokens: 0,
+        estimatedUsd: null,
+        windowPercent: 0,
+      } as const;
+      const change = { action: "plan", step } as const;
+      expect((yield* Effect.flip(f.send(change, f.a, original))).detail).toMatch(
+        /before any attempt/,
+      );
+      const updated = yield* f.send(change, f.operator, original);
+      expect((yield* readQueueAttempts(f.dir)).map((a) => [a.attempt, a.blockedBy])).toEqual([
+        [1, "needs-acceptance"],
+        [2, "needs-acceptance"],
+      ]);
+      expect((yield* Effect.flip(f.send(change, f.operator, original))).detail).toMatch(/stale/);
+      yield* f.send(f.claim, f.a, updated, 2);
+      expect((yield* Effect.flip(f.send(change, f.operator, updated))).detail).toMatch(
+        /before any attempt/,
+      );
+    }),
 );

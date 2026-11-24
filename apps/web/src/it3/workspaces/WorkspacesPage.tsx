@@ -1,3 +1,4 @@
+import { QueuePreview } from "./QueuePreview";
 import { TaskBoard } from "./TaskBoard";
 import styles from "./workspaces.module.css";
 import { T, useGT } from "gt-react";
@@ -400,6 +401,8 @@ function ProjectHome({
     : tree.roots.length === 1
       ? tree.roots[0]
       : undefined;
+  const queueSupported =
+    useServerConfigs().get(p.environmentId)?.environment.capabilities.it3QueuePreview === true;
   const taskSupported =
     useServerConfigs().get(p.environmentId)?.environment.capabilities.it3Tasks === true;
   const view = node ? "docs" : (query.view ?? "agents");
@@ -524,6 +527,7 @@ function ProjectHome({
         {[
           ["agents", gt("Agents")],
           ["tasks", gt("Tasks")],
+          ...(queueSupported ? [["queue", gt("Queue preview")]] : []),
           ["docs", gt("Documentation")],
           ["usage", gt("Usage and cost")],
         ].map(([key, label]) => (
@@ -547,6 +551,7 @@ function ProjectHome({
             key={JSON.stringify([query.task, query.assign])}
             project={p}
             threads={threads}
+            queueSupported={queueSupported}
             selected={query.task}
             thread={query.agent}
             seed={query.assign}
@@ -565,6 +570,8 @@ function ProjectHome({
             <T>Update this environment to enable shared tasks.</T>
           </p>
         )
+      ) : view === "queue" && queueSupported ? (
+        <QueuePreview project={p} policy={config?.queuePolicy ?? null} />
       ) : view === "docs" ? (
         <ProjectLibrary project={p} node={node} onNode={onNode} />
       ) : view === "usage" ? (

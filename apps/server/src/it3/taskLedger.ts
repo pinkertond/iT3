@@ -4,6 +4,8 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 import {
+  QueueStep,
+  ProjectId,
   TaskBrief,
   TaskLedgerError,
   type TaskAttempt,
@@ -232,6 +234,22 @@ function reduce(
   let a = { ...old, revision: old.revision + 1, updated: at };
   let accepted: number | null = null;
   switch (c.action) {
+    case "plan": {
+      if (
+        actor.kind !== "operator" ||
+        edit.attempt !== 1 ||
+        !task.attempts.every((x) => x.stage === "ready")
+      )
+        refuse("Edit the queue step before any attempt is assigned.");
+      if (c.step?.dependencies.includes(edit.key)) refuse("A step cannot depend on its own task.");
+      const result = {
+        ...task,
+        attempts: task.attempts.map((other) => (other.number === 1 ? a : other)),
+      };
+      if (c.step) result.queueStep = c.step;
+      else delete result.queueStep;
+      return result;
+    }
     case "inspect":
       if (actor.kind !== "operator" || old.stage !== "working" || !evidence.recovery)
         refuse("Only a working attempt can be inspected.");
@@ -375,19 +393,21 @@ export function writeTask(
         result = reduce(current, edit, actor, at, evidence);
       const c = edit.change;
       const summary =
-        c.action === "create"
-          ? c.title
-          : c.action === "handoff"
-            ? c.target + " · " + c.next
-            : c.action === "claim"
-              ? c.next
-              : c.action === "inspect"
-                ? "Inspected working files and previous turn"
-                : c.action === "accept"
-                  ? "Accepted result"
-                  : c.action === "notify"
-                    ? "Queued in the receiving chat"
-                    : c.checkpoint;
+        c.action === "plan"
+          ? (c.step?.next ?? "Removed queue step")
+          : c.action === "create"
+            ? c.title
+            : c.action === "handoff"
+              ? c.target + " · " + c.next
+              : c.action === "claim"
+                ? c.next
+                : c.action === "inspect"
+                  ? "Inspected working files and previous turn"
+                  : c.action === "accept"
+                    ? "Accepted result"
+                    : c.action === "notify"
+                      ? "Queued in the receiving chat"
+                      : c.checkpoint;
       const detail =
         c.action === "checkpoint"
           ? [
@@ -425,6 +445,52 @@ export function writeTask(
       );
       db.exec("COMMIT");
       return result;
+    } finally {
+      db.close();
+    }
+  });
+}
+
+export interface QueueAttempt {
+  projectId: ProjectId;
+  key: string;
+  title: string;
+  attempt: number;
+  readySince: string;
+  stage: string;
+  step: QueueStep | null;
+  blockedBy: string | null;
+}
+const decodeQueueStep = Schema.decodeUnknownSync(Schema.fromJsonString(QueueStep));
+export function readQueueAttempts(directory: string) {
+  return guard((): QueueAttempt[] => {
+    if (!NodeFS.existsSync(NodePath.join(directory, "it3-tasks.sqlite"))) return [];
+    const db = connect(directory, true);
+    try {
+      if (db.prepare("PRAGMA user_version").get()?.user_version === 0) return [];
+      const rows = db
+        .prepare(`SELECT t.project,t.key,json_extract(t.body,'$.title') title,
+        json_extract(t.body,'$.queueStep') step,a.value ->> '$.number' attempt,a.value ->> '$.stage' stage,
+        MAX(e.at, COALESCE((SELECT MAX(plan.at) FROM events plan WHERE plan.project=t.project AND plan.key=t.key AND plan.action='plan'),e.at),
+          COALESCE((SELECT MAX(done.at) FROM json_each(t.body,'$.queueStep.dependencies') d
+            JOIN events done ON done.project=t.project AND done.key=d.value AND done.action='accept'),e.at)) ready_since,
+        (SELECT d.value FROM json_each(t.body,'$.queueStep.dependencies') d
+          LEFT JOIN tasks parent ON parent.project=t.project AND parent.key=d.value
+          WHERE json_extract(parent.body,'$.accepted') IS NULL LIMIT 1) blocked
+        FROM tasks t JOIN events e ON e.project=t.project AND e.key=t.key AND e.action='create'
+        JOIN json_each(t.body,'$.attempts') a
+        WHERE json_extract(t.body,'$.accepted') IS NULL AND a.value ->> '$.stage' != 'submitted'`)
+        .all();
+      return rows.map((r) => ({
+        projectId: ProjectId.make(String(r.project)),
+        key: String(r.key),
+        title: String(r.title),
+        attempt: Number(r.attempt),
+        readySince: String(r.ready_since),
+        stage: String(r.stage),
+        step: r.step ? decodeQueueStep(String(r.step)) : null,
+        blockedBy: r.blocked === null ? null : String(r.blocked),
+      }));
     } finally {
       db.close();
     }

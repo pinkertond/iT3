@@ -1,3 +1,4 @@
+import { QueueStep } from "./it3Queue.ts";
 import * as Schema from "effect/Schema";
 import { NonNegativeInt, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -41,6 +42,7 @@ export const TaskAttempt = Schema.Struct({
 });
 export type TaskAttempt = typeof TaskAttempt.Type;
 export const TaskBrief = Schema.Struct({
+  queueStep: Schema.optionalKey(QueueStep),
   key,
   title: short,
   request: note,
@@ -73,6 +75,7 @@ const TaskAction = Schema.Union([
   }),
   Schema.Struct({ action: Schema.Literal("handoff"), target: ThreadId, next: note }),
   Schema.Struct({ action: Schema.Literal("inspect") }),
+  Schema.Struct({ action: Schema.Literal("plan"), step: Schema.NullOr(QueueStep) }),
   ...workerActions,
   Schema.Struct({ action: Schema.Literal("notify") }),
   Schema.Struct({ action: Schema.Literal("accept") }),

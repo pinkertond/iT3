@@ -13,3 +13,14 @@ Open a project from **Workspaces**. A project with one root conversation opens t
 - Usage comes from provider history available on this host. A session must match a unique native provider ID. Shared or unmatched records are excluded. The report labels unpriced records and combines provider-reported costs and model-rate estimates. Subscription bills and unobserved work cannot be inferred from this number.
 
 The local desktop and web clients share these views. Each connected host reports its own sessions and project settings.
+
+## Preview the next step
+
+Open **Workspaces → a project → Queue preview**. The first eligible attempt is marked **Next up**. The list covers active projects on the selected host, including those in other workspaces. Click a task title to open its brief. A visible queue refreshes every minute and when the window regains visibility. **Refresh** requests a new evaluation immediately.
+
+1. In **Tasks**, open a ready task and expand **Queue step**. Enter the next action and its completion check. Add prerequisite task IDs from the same project if needed. A prerequisite clears when an operator accepts its result.
+2. Choose **Deterministic check** for a step that takes zero model tokens. For an economy or advanced model, estimate input, output and the percentage points the step could consume in each applicable provider window. A daily USD cap also requires a cost estimate.
+3. Under **Queue preview → Project queue policy**, set daily budgets, the maximum estimated context per step, a priority, a reserve percentage and allowed models. The budget day begins at midnight UTC. Background steps can use the economy route. Urgent steps can use the reserve. Active projects sharing a recognized provider account protect the largest configured allowance reserve.
+4. Expand a row to see its completion check, observed allowance, estimated balance after this one step and reported reset times. Each row is an independent alternative. An unavailable reading, a reading older than ten minutes, or a reset since the last reading holds model work. The project report counts uniquely attributable sessions. An unsettled active attempt can also hold capacity.
+
+The preview reads recorded state and spends zero model tokens. A ready row is a budget and priority decision. Starting agents, checking execution permissions at dispatch, reserving shared capacity across machines and reconciling actual per-step costs are later milestones.

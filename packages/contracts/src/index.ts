@@ -79,3 +79,4 @@ export * from "./secretReference.ts";
 export * from "./settingsSecretValue.ts";
 export * from "./clientRpcPermissions.ts";
 export * from "./it3Tasks.ts";
+export * from "./it3Queue.ts";

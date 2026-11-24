@@ -42,3 +42,5 @@ The manager can pick up known work without someone sending a prompt each time. T
 - [Model choice, context and feedback](loop-routing.md)
 
 **First release check.** Run the scheduler in preview against recorded events. Start with one active project under a configured allowance, then replay several projects competing for the same account. Enable automatic starts once the recorded decisions agree with the policy.
+
+**Implemented milestone — host queue preview.** Operators can record one estimated step per task and a policy per project. The project home ranks ready attempts across active projects and explains their budgets, provider windows and holds. The same task ID can exist in two projects. The view links each row to its own project and task. The executable behavior and operating instructions are in [Preview the next step](../../user/it3-project-agents.md#preview-the-next-step). Durable reservations, dispatch and settlement remain proposed.

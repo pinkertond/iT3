@@ -1,5 +1,6 @@
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
+import { QueueStepForm } from "./QueueForms";
 import { BranchUsage } from "./ProjectUsage";
 import { useDiffPanelStore } from "~/diffPanelStore";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -25,6 +26,7 @@ import { PageList } from "./PageList";
 import styles from "./workspaces.module.css";
 
 type Props = {
+  queueSupported?: boolean;
   thread?: string | undefined;
   project: Project;
   threads: readonly EnvironmentThreadShell[];
@@ -33,7 +35,16 @@ type Props = {
   source?: string | undefined;
   onSelect: (key?: string) => void;
 };
-export function TaskBoard({ project, threads, selected, seed, source, thread, onSelect }: Props) {
+export function TaskBoard({
+  queueSupported,
+  project,
+  threads,
+  selected,
+  seed,
+  source,
+  thread,
+  onSelect,
+}: Props) {
   const gt = useGT();
   const recordKey = selected ?? seed;
   const [offset, setOffset] = useState(0);
@@ -244,6 +255,26 @@ export function TaskBoard({ project, threads, selected, seed, source, thread, on
                 ? gt("Comparing two attempts")
                 : gt("Single attempt")}
           </p>
+          {queueSupported &&
+            current.attempts[0] &&
+            current.attempts.every((a) => a.stage === "ready") && (
+              <QueueStepForm
+                key={JSON.stringify([current.key, current.attempts[0].revision])}
+                step={current.queueStep ?? null}
+                busy={busy || !canWrite}
+                onSave={(step) => {
+                  const attempt = current.attempts[0]!;
+                  void write({
+                    key: current.key,
+                    attempt: 1,
+                    revision: attempt.revision,
+                    generation: attempt.generation,
+                    requestId: randomUUID(),
+                    change: { action: "plan", step },
+                  });
+                }}
+              />
+            )}
           <div className={styles["task-attempts"]}>
             {current.attempts.map((a) => (
               <Attempt

@@ -1,3 +1,4 @@
+import { QueuePolicy } from "./it3Queue.ts";
 import { EasDeviceHostConfigs, SimlockDeviceHostConfigs, SshDeviceHostConfigs } from "./device.ts";
 import {
   AuthOrchestrationOperateScope,
@@ -1380,6 +1381,7 @@ export const CloudSpeechCredentials = Schema.Struct({
 // Sparse host settings keep workspace assignments shared by all clients of an environment.
 const It3WorkspaceLabel = TrimmedNonEmptyString.check(Schema.isMaxLength(80));
 const It3ProjectPlacement = Schema.Struct({
+  queuePolicy: Schema.optionalKey(Schema.NullOr(QueuePolicy)),
   taskRefs: Schema.optionalKey(
     Schema.Record(ThreadId, Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(160)))),
   ),

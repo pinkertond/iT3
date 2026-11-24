@@ -19,7 +19,9 @@ vi.mock("~/state/entities", async (original) => ({
           settings: {
             it3Workspaces: { projects: { one: { workspace: "Work" }, two: { status: "paused" } } },
           },
-          environment: { capabilities: { it3Workspaces: true, it3AgentView: true } },
+          environment: {
+            capabilities: { it3Workspaces: true, it3AgentView: true, it3QueuePreview: true },
+          },
         },
       ],
     ]),
@@ -35,6 +37,7 @@ vi.mock("~/state/session", async (original) => ({
 }));
 vi.mock("~/state/environments", async (original) => ({
   ...(await original<object>()),
+  useEnvironmentProviders: () => new Map(),
   useEnvironmentIdentities: () => [{ environmentId: "local", label: "Mac" }],
   usePrimaryEnvironmentId: () => "local",
 }));
@@ -101,3 +104,60 @@ vi.mock("~/components/settings/useSettingsProjectGroups", () => ({
     },
   ],
 }));
+
+vi.mock("~/state/query", async (original) => ({
+  ...(await original<object>()),
+  useEnvironmentQuery: () => ({
+    refresh: vi.fn(),
+    data: {
+      asOf: "2026-01-01T12:00:00Z",
+      day: "2026-01-01",
+      total: 1,
+      eligible: 1,
+      rows: [
+        {
+          key: "check",
+          projectId: "one",
+          project: "Atlas",
+          attempt: 1,
+          title: "Index integrity",
+          priority: "normal",
+          reason: "ready",
+          detail: "Check locally",
+          next: "",
+          windows: [],
+          remainingTokens: null,
+        },
+      ],
+    },
+  }),
+}));
+it("opens the host queue from a project and saves its daily policy", async () => {
+  useWorkspaceView.getState().select("");
+  await using screen = await render(<WorkspacesPage />, { router: "/workspaces" });
+  await screen.getByRole("link", { name: /Atlas/ }).click();
+  await screen.getByRole("button", { name: "Queue preview" }).click();
+  await expect.element(screen.getByText("Next up", { exact: true })).toBeVisible();
+  await expect
+    .element(screen.getByRole("link", { name: "Index integrity" }))
+    .toHaveAttribute("href", expect.stringContaining("task=check"));
+  await screen.getByText(/Project queue policy/).click();
+  await screen.getByLabelText("Daily token budget (UTC)").fill("5000");
+  await screen.getByLabelText("Context ceiling per step (tokens)").fill("1000");
+  await screen.getByRole("button", { name: "Save queue policy" }).click();
+  expect(write).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: {
+        patch: {
+          it3Workspaces: {
+            projects: {
+              one: {
+                queuePolicy: expect.objectContaining({ dailyTokens: 5000, contextTokens: 1000 }),
+              },
+            },
+          },
+        },
+      },
+    }),
+  );
+});

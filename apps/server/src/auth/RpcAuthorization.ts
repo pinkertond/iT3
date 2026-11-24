@@ -124,6 +124,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverGetProcessResourceHistory]: AuthDiagnosticsReadScope,
   [WS_METHODS.serverGetResourceTelemetryHistory]: AuthDiagnosticsReadScope,
   [WS_METHODS.serverRetryResourceTelemetry]: AuthDiagnosticsReadScope,
+  [WS_METHODS.it3QueuePreview]: AuthDiagnosticsReadScope,
   [WS_METHODS.it3ReadTasks]: AuthOrchestrationReadScope,
   [WS_METHODS.it3WriteTask]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverGetUsageSummary]: AuthDiagnosticsReadScope,
@@ -316,6 +317,8 @@ const requiredScopesForRpcCall = (
   method: string,
   payload: unknown,
 ): ReadonlyArray<AuthEnvironmentScope> => {
+  if (method === WS_METHODS.it3QueuePreview)
+    return [AuthDiagnosticsReadScope, AuthOrchestrationReadScope];
   if (
     method === WS_METHODS.serverGetUsageSummary &&
     typeof payload === "object" &&

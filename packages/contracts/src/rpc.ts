@@ -1,3 +1,4 @@
+import { QueuePreview } from "./it3Queue.ts";
 import { TaskRead, TaskWrite, TaskPage, TaskBrief, TaskLedgerError } from "./it3Tasks.ts";
 import {
   OrchestrationV2SearchThreadError,
@@ -631,6 +632,7 @@ export const WS_METHODS = {
   serverPrepareTriage: "server.prepareTriage",
   serverSignalProcess: "server.signalProcess",
   serverReportClientActivity: "server.reportClientActivity",
+  it3QueuePreview: "it3.queuePreview",
   it3ReadTasks: "it3.readTasks",
   it3WriteTask: "it3.writeTask",
   serverGetUsageSummary: "server.getUsageSummary",
@@ -1174,6 +1176,11 @@ const WsServerPrepareTriageRpc = Rpc.make(WS_METHODS.serverPrepareTriage, {
   error: Schema.Union([ServerPrepareTriageError, EnvironmentAuthorizationError]),
 });
 
+const It3QueuePreviewRpc = Rpc.make(WS_METHODS.it3QueuePreview, {
+  payload: Schema.Struct({ offset: NonNegativeInt }),
+  success: QueuePreview,
+  error: Schema.Union([EnvironmentAuthorizationError, TaskLedgerError]),
+});
 const It3ReadTasksRpc = Rpc.make(WS_METHODS.it3ReadTasks, {
   payload: TaskRead,
   success: TaskPage,
@@ -2550,6 +2557,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerCheckOtlpEndpointRpc,
   WsServerListTextGeneratorModelsRpc,
   WsServerPrepareTriageRpc,
+  It3QueuePreviewRpc,
   It3ReadTasksRpc,
   It3WriteTaskRpc,
   WsServerGetUsageSummaryRpc,
