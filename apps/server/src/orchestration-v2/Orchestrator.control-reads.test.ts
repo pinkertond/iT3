@@ -3284,3 +3284,42 @@ it.each([
     assert.isAtMost(reads.count, 2 * (size + size));
   },
 );
+
+it.effect("rejects reviewer delivery to an unbound full-access chat before creating a run", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2,
+      projections = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = ThreadId.make("reviewer-denial");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("reviewer-denial-create"),
+      threadId,
+      projectId: ProjectId.make("reviewer-project"),
+      title: "Other chat",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const denied = yield* Effect.result(
+      orchestrator.dispatch({
+        type: "message.dispatch",
+        reviewerOnly: true,
+        commandId: CommandId.make("reviewer-denial-send"),
+        threadId,
+        messageId: MessageId.make("reviewer-denial-message"),
+        text: "Review",
+        attachments: [],
+        modelSelection,
+        dispatchMode: { type: "defer_start" },
+        createdBy: "system",
+        creationSource: "server",
+      }),
+    );
+    assert.equal(denied._tag, "Failure");
+    assert.lengthOf((yield* projections.getThreadRecords(threadId, ["runs"])).runs, 0);
+  }).pipe(Effect.provide(layerTest)),
+);

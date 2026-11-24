@@ -2,8 +2,9 @@ import { readCanvas } from "@t3tools/shared/it3WorkflowGraph";
 import { taskCheckouts } from "./it3/taskRecovery.ts";
 import { CheckpointStore } from "./checkpointing/CheckpointStore.ts";
 import { handleTaskWrite } from "./it3/taskHandoff.ts";
-import { activeQueueProjects, previewQueue } from "./it3/queuePreview.ts";
-import { readQueueAttempts, readTask } from "./it3/taskLedger.ts";
+import { makeQueueReader } from "./it3/queueReader.ts";
+import { previewQueue } from "./it3/queuePreview.ts";
+import { readTask } from "./it3/taskLedger.ts";
 import { readProjectUsageOwners } from "./it3/projectUsage.ts";
 import { GitCommandError, OrchestrationDispatchCommandError } from "@t3tools/contracts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- A synchronous digest inside the pure provider mapping.
@@ -36,8 +37,6 @@ import { rpcInitialItems } from "./rpcInitialItems.ts";
 import { subscribeChatGptHandoff } from "./provider/CodexChatGptHandoff.ts";
 import {
   AcpRegistryOperationError,
-  TaskLedgerError,
-  UsageDay,
   CommandId,
   authScopeResponse,
   AuthAccessStreamError,
@@ -1563,6 +1562,7 @@ export const layerWsRpc = (
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
+      const readQueueInput = yield* makeQueueReader;
       const it3Checkouts = taskCheckouts(yield* CheckpointStore, yield* GitVcsDriver.GitVcsDriver);
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager.TerminalManager;
@@ -2848,51 +2848,7 @@ export const layerWsRpc = (
         [WS_METHODS.serverGetResourceTelemetryHistory]: (input) =>
           resourceTelemetry.readHistory(input),
         [WS_METHODS.it3QueuePreview]: Effect.fn("it3.queuePreview")(function* ({ offset }) {
-          const settings = yield* serverSettings.getSettings.pipe(
-            Effect.mapError(() => new TaskLedgerError({ detail: "Could not read queue policy." })),
-          );
-          const projects = yield* projectStore
-            .listShells()
-            .pipe(
-              Effect.mapError(
-                () => new TaskLedgerError({ detail: "Could not read projects for the queue." }),
-              ),
-            );
-          const attempts = yield* readQueueAttempts(config.stateDir);
-          const providers = yield* providerRegistry.getProviders;
-          const day = UsageDay.make(DateTime.formatIso(yield* DateTime.now).slice(0, 10));
-          const paidProjects = new Set(
-            attempts
-              .filter((a) => a.stage === "ready" && a.step && a.step.route !== "check")
-              .map((a) => a.projectId),
-          );
-          const reports = yield* Effect.forEach(
-            activeQueueProjects(projects, settings).filter(
-              (p) =>
-                paidProjects.has(p.id) && settings.it3Workspaces?.projects?.[p.id]?.queuePolicy,
-            ),
-            (p) =>
-              readProjectUsageOwners(sql, p.id).pipe(
-                Effect.flatMap((owners) =>
-                  usage.readSummary(
-                    { it3ProjectId: p.id, timeZone: "UTC", sinceDay: day, untilDay: day },
-                    owners,
-                  ),
-                ),
-                Effect.orElseSucceed(() => null),
-                Effect.map((report) => [p.id, report] as const),
-              ),
-            { concurrency: 2 },
-          );
-          return previewQueue({
-            projects,
-            settings,
-            attempts,
-            providers,
-            reports: new Map(reports),
-            offset,
-            asOf: DateTime.formatIso(yield* DateTime.now),
-          });
+          return previewQueue(yield* readQueueInput(offset));
         }),
         [WS_METHODS.it3ReadTasks]: (input) =>
           readTask(config.stateDir, input.projectId, input.key, input.offset, input.threadId),

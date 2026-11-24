@@ -27,6 +27,7 @@ import { PageList } from "./PageList";
 import styles from "./workspaces.module.css";
 
 type Props = {
+  reviewSupported?: boolean;
   queueSupported?: boolean;
   thread?: string | undefined;
   project: Project;
@@ -37,6 +38,7 @@ type Props = {
   onSelect: (key?: string) => void;
 };
 export function TaskBoard({
+  reviewSupported,
   queueSupported,
   project,
   threads,
@@ -260,6 +262,9 @@ export function TaskBoard({
             current.attempts[0] &&
             current.attempts.every((a) => a.stage === "ready") && (
               <QueueStepForm
+                reviewSupported={
+                  reviewSupported && !current.comparison && !current.attempts[0]?.review
+                }
                 key={JSON.stringify([current.key, current.attempts[0].revision])}
                 step={current.queueStep ?? null}
                 busy={busy || !canWrite}
@@ -397,6 +402,46 @@ function Attempt({
         )}{" "}
         {a.model && " · " + a.model}
       </p>
+      {(task.queueStep?.seat === "reviewer" || a.review) && (
+        <section aria-label={gt("Reviewer dispatch")}>
+          <strong>
+            <T>Reviewer dispatch</T>
+          </strong>
+          <p>{a.reviewHold || a.review?.detail || gt("Queued for eligibility check")}</p>
+          {a.review && (
+            <>
+              <p>
+                <T>Reserved</T> · {a.review.reservedTokens.toLocaleString()} <T>tokens</T>
+                {a.review.reservedUsd !== null && " · $" + a.review.reservedUsd.toFixed(4)}
+              </p>
+              {a.review.run && (
+                <p>
+                  <Link
+                    to="/$environmentId/$threadId"
+                    params={{ environmentId: project.environmentId, threadId: a.review.thread }}
+                  >
+                    <T>Open reviewer chat</T>
+                  </Link>{" "}
+                  · <code>{a.review.run}</code>
+                </p>
+              )}
+              {a.review.finished && (
+                <p>
+                  {a.review.tokens === null
+                    ? gt("Token usage unavailable")
+                    : gt("{count} measured tokens", {
+                        count: a.review.tokens.toLocaleString(),
+                      })}{" "}
+                  ·{" "}
+                  {a.review.pricedUsd === null
+                    ? gt("Cost unavailable")
+                    : gt("Model-priced USD {value}", { value: a.review.pricedUsd.toFixed(4) })}
+                </p>
+              )}
+            </>
+          )}
+        </section>
+      )}
       <dl>
         <dt>
           <T>Last checkpoint</T>

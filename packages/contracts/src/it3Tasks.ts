@@ -20,7 +20,32 @@ export const TaskRecovery = Schema.Struct({
   changes: Schema.Array(Schema.Struct({ path: Schema.String, declared: Schema.Boolean })),
 });
 export type TaskRecovery = typeof TaskRecovery.Type;
+const ReviewReceipt = Schema.Struct({
+  id: Schema.String,
+  thread: ThreadId,
+  pool: Schema.String,
+  driver: Schema.String,
+  identified: Schema.Boolean,
+  provider: Schema.String,
+  model: Schema.String,
+  phase: Schema.Literals(["reserved", "running", "completed", "failed"]),
+  day: Schema.String,
+  spentBeforeTokens: NonNegativeInt,
+  spentBeforeUsd: Schema.NullOr(Schema.Number),
+  reservedTokens: NonNegativeInt,
+  reservedUsd: Schema.NullOr(Schema.Number),
+  windowPercent: Schema.Number,
+  run: Schema.NullOr(Schema.String),
+  detail: Schema.String,
+  finished: Schema.NullOr(Schema.String),
+  nextAccounting: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  tokens: Schema.NullOr(NonNegativeInt),
+  pricedUsd: Schema.NullOr(Schema.Number),
+});
+export type ReviewReceipt = typeof ReviewReceipt.Type;
 export const TaskAttempt = Schema.Struct({
+  reviewHold: Schema.optionalKey(Schema.String),
+  review: Schema.optionalKey(ReviewReceipt),
   number: Schema.Literals([1, 2]),
   generation: NonNegativeInt,
   revision: NonNegativeInt,

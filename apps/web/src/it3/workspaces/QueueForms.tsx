@@ -1,3 +1,4 @@
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { useState } from "react";
 import { T, useGT } from "gt-react";
 import { AuthSettingsWriteScope, type QueuePolicy, type QueueStep } from "@t3tools/contracts";
@@ -71,7 +72,9 @@ export function QueuePolicyForm({
   project,
   policy,
   onSaved,
+  reviewerChats,
 }: {
+  reviewerChats?: readonly EnvironmentThreadShell[] | undefined;
   project: Project;
   policy: QueuePolicy | null;
   onSaved: () => void;
@@ -117,6 +120,9 @@ export function QueuePolicyForm({
             routes.find((r) => key(r) === field(d, k)) ??
             (key(policy?.[k] ?? null) === field(d, k) ? (policy?.[k] ?? null) : null);
           void save({
+            ...(reviewerChats
+              ? { reviewer: reviewerChats.find((t) => t.id === field(d, "reviewer"))?.id ?? null }
+              : {}),
             priority: priority(field(d, "priority")),
             dailyTokens: number(d, "tokens"),
             dailyUsd: field(d, "usd") ? number(d, "usd") : null,
@@ -128,6 +134,29 @@ export function QueuePolicyForm({
         }}
       >
         <fieldset disabled={!writable || saving}>
+          {reviewerChats && (
+            <label>
+              <T>Reviewer seat</T>
+              <select name="reviewer" defaultValue={policy?.reviewer ?? ""}>
+                <option value="">
+                  <T>Unbound</T>
+                </option>
+                {reviewerChats
+                  .filter((t) => !t.archivedAt && !t.deletedAt)
+                  .map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.title}
+                    </option>
+                  ))}
+              </select>
+              <small>
+                <T>
+                  Choose a Plan chat using the queue model and Auto or approval-required
+                  permissions.
+                </T>
+              </small>
+            </label>
+          )}
           <Priority value={policy?.priority ?? "normal"} />
           <Amount
             name="tokens"
@@ -192,7 +221,9 @@ export function QueueStepForm({
   step,
   busy,
   onSave,
+  reviewSupported = false,
 }: {
+  reviewSupported?: boolean | undefined;
   step: QueueStep | null;
   busy: boolean;
   onSave: (step: QueueStep | null) => void;
@@ -214,6 +245,9 @@ export function QueueStepForm({
           onSave({
             next: field(d, "next"),
             verification: field(d, "verification"),
+            ...(reviewSupported && route !== "check" && d.has("reviewer")
+              ? { seat: "reviewer" as const }
+              : {}),
             priority: tier ? priority(tier) : null,
             route,
             dependencies: Array.from(
@@ -267,6 +301,16 @@ export function QueueStepForm({
           </label>
           {route !== "check" && (
             <>
+              {reviewSupported && (
+                <label>
+                  <input
+                    type="checkbox"
+                    name="reviewer"
+                    defaultChecked={step?.seat === "reviewer"}
+                  />
+                  <T>Assign to Reviewer automatically when eligible</T>
+                </label>
+              )}
               <Amount
                 name="input"
                 label={gt("Estimated input tokens")}

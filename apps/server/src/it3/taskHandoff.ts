@@ -62,6 +62,10 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
     return yield* writeTask(directory, projectId, edit, actor);
   const before = yield* readTask(directory, projectId, edit.key);
   const slot = before.brief?.attempts.find((a) => a.number === edit.attempt);
+  if (slot?.review && !slot.review.finished)
+    return yield* new TaskLedgerError({
+      detail: "Open the reviewer run to inspect or stop it. Its delivery has a separate receipt.",
+    });
   const root = project.value.workspaceRoot;
   const evidence: RecoveryEvidence = {};
   const inspect = (a: NonNullable<typeof slot>, source: ThreadId) =>

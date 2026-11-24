@@ -1,3 +1,4 @@
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { useEffect, useState } from "react";
 import { T, useGT } from "gt-react";
 import { Link } from "@tanstack/react-router";
@@ -17,7 +18,9 @@ const pct = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 
 export function QueuePreview({
   project,
   policy,
+  reviewerChats,
 }: {
+  reviewerChats?: readonly EnvironmentThreadShell[] | undefined;
   project: Project;
   policy: QueuePolicy | null;
 }) {
@@ -68,7 +71,12 @@ export function QueuePreview({
           that step ran next. Previewing starts no work.
         </T>
       </p>
-      <QueuePolicyForm project={project} policy={policy} onSaved={q.refresh} />
+      <QueuePolicyForm
+        reviewerChats={reviewerChats}
+        project={project}
+        policy={policy}
+        onSaved={q.refresh}
+      />
       {q.error && <p role="alert">{q.error}</p>}
       {data ? (
         <>
@@ -104,6 +112,14 @@ export function QueuePreview({
               </Link>{" "}
               · {r.key} · <T>Attempt</T> {r.attempt}
               <p>{r.detail}</p>
+              {r.reviewer && (
+                <p>
+                  <strong>
+                    <T>Reviewer</T>
+                  </strong>{" "}
+                  · {r.reviewer}
+                </p>
+              )}
               {r.next && (
                 <details>
                   <summary>{r.next}</summary>

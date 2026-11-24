@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { NonNegativeInt, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
 const Priority = Schema.Literals(["urgent", "normal", "background"]);
@@ -7,6 +7,7 @@ const Route = Schema.Struct({ instanceId: ProviderInstanceId, model: TrimmedNonE
 const Percent = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 }));
 const Money = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 export const QueuePolicy = Schema.Struct({
+  reviewer: Schema.optionalKey(Schema.NullOr(ThreadId)),
   priority: Priority,
   dailyTokens: NonNegativeInt,
   dailyUsd: Schema.NullOr(Money),
@@ -18,6 +19,7 @@ export const QueuePolicy = Schema.Struct({
 export type QueuePolicy = typeof QueuePolicy.Type;
 
 export const QueueStep = Schema.Struct({
+  seat: Schema.optionalKey(Schema.Literal("reviewer")),
   priority: Schema.NullOr(Priority),
   route: Schema.Literals(["check", "economy", "advanced"]),
   next: TrimmedNonEmptyString.check(Schema.isMaxLength(600)),
@@ -39,6 +41,7 @@ const Window = Schema.Struct({
   reset: Schema.NullOr(Schema.String),
 });
 const Decision = Schema.Struct({
+  reviewer: Schema.optionalKey(Schema.String),
   projectId: ProjectId,
   project: Schema.String,
   key: Schema.String,

@@ -1,3 +1,5 @@
+import * as ReviewCommandReceipts from "./orchestration-v2/CommandReceiptStore.ts";
+import { startReviewer } from "./it3/reviewerDispatch.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
 import * as Random from "effect/Random";
@@ -1402,6 +1404,10 @@ const layerMakeServer = Layer.unwrap(
     );
     const layerServerApplication = Layer.mergeAll(
       layerRoutes,
+      Layer.effectDiscard(startReviewer).pipe(
+        Layer.provide(ReviewCommandReceipts.layer),
+        Layer.provide(layerLauncher),
+      ),
       layerHttpListening,
       layerDesktopReadySignal,
       layerRuntimeState.pipe(Layer.provide(layerLauncher)),

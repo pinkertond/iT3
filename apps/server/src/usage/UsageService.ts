@@ -50,6 +50,8 @@ import {
   createOverrideRateTable,
   isUnlistedModel,
   parseRateTable,
+  priceUsage,
+  type PricedRecord,
   type RateTable,
 } from "./usagePricing.ts";
 import {
@@ -171,6 +173,9 @@ export class UsageService extends Context.Service<
       input: UsageSummaryInput,
       owners?: ProjectOwners,
     ) => Effect.Effect<UsageSummary, UsageReadError>;
+    readonly priceRunRecord?: (
+      record: PricedRecord,
+    ) => Effect.Effect<number | null, UsageReadError>;
     readonly refreshRates: Effect.Effect<UsagePricing>;
   }
 >()("t3/usage/UsageService") {}
@@ -1287,7 +1292,19 @@ export const make = Effect.gen(function* () {
     return yield* Deferred.await(deferred);
   });
 
-  return { readSummary, refreshRates, awaitPersisted } as const;
+  const priceRunRecord = (record: PricedRecord) =>
+    loadSavedRates.pipe(
+      Effect.andThen(readSettings),
+      Effect.map((settings) => {
+        const priced = priceUsage(
+          rates,
+          record,
+          createOverrideRateTable(settings.usagePriceOverrides),
+        );
+        return priced.costSource === "unpriced" ? null : priced.costUsd;
+      }),
+    );
+  return { readSummary, refreshRates, awaitPersisted, priceRunRecord } as const;
 });
 
 export const layer = Layer.effect(UsageService, make);

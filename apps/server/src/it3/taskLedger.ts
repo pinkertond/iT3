@@ -24,7 +24,7 @@ function refuse(detail: string): never {
   throw new TaskLedgerError({ detail });
 }
 const parse = Schema.decodeUnknownSync(Schema.fromJsonString(TaskBrief));
-function connect(directory: string, readOnly = false) {
+export function openTaskLedger(directory: string, readOnly = false) {
   const path = NodePath.join(directory, "it3-tasks.sqlite");
   if (!readOnly) NodeFS.closeSync(NodeFS.openSync(path, "a", 0o600));
   const db = new NodeSqlite.DatabaseSync(path, { readOnly });
@@ -46,7 +46,7 @@ function connect(directory: string, readOnly = false) {
   }
 }
 const isLedgerError = Schema.is(TaskLedgerError);
-function guard<A>(fn: () => A) {
+export function taskLedgerOperation<A>(fn: () => A) {
   return Effect.try({
     try: fn,
     catch: (e) =>
@@ -64,10 +64,10 @@ export function readTaskBrief(
   worker: ThreadId,
   number?: 1 | 2,
 ) {
-  return guard(() => {
+  return taskLedgerOperation(() => {
     if (!NodeFS.existsSync(NodePath.join(directory, "it3-tasks.sqlite")))
       return refuse("Task does not exist in this project.");
-    const db = connect(directory, true);
+    const db = openTaskLedger(directory, true);
     try {
       const task = lookup(db, project, key) ?? refuse("Task does not exist in this project.");
       const assignedToThisChat = task.attempts
@@ -91,10 +91,10 @@ export function readTask(
   offset = 0,
   thread?: ThreadId,
 ) {
-  return guard((): TaskPage => {
+  return taskLedgerOperation((): TaskPage => {
     const empty = { contributors: [], tasks: [], events: [], brief: null, more: false };
     if (!NodeFS.existsSync(NodePath.join(directory, "it3-tasks.sqlite"))) return empty;
-    const db = connect(directory, true);
+    const db = openTaskLedger(directory, true);
     try {
       db.exec("BEGIN");
       if (db.prepare("PRAGMA user_version").get()?.user_version === 0) return empty;
@@ -231,10 +231,17 @@ function reduce(
     old.generation !== edit.generation
   )
     refuse("Claim or revision is stale. Read the current brief.");
+  if (old.review && !old.review.finished)
+    refuse(
+      "The reviewer owns this attempt until its native run ends. Open the reviewer chat to answer or stop it.",
+    );
   let a = { ...old, revision: old.revision + 1, updated: at };
   let accepted: number | null = null;
   switch (c.action) {
     case "plan": {
+      if (c.step?.seat && (c.step.route === "check" || task.comparison || old.review))
+        refuse("Choose a model route and a single attempt for automatic review.");
+
       if (
         actor.kind !== "operator" ||
         edit.attempt !== 1 ||
@@ -242,6 +249,7 @@ function reduce(
       )
         refuse("Edit the queue step before any attempt is assigned.");
       if (c.step?.dependencies.includes(edit.key)) refuse("A step cannot depend on its own task.");
+      delete a.reviewHold;
       const result = {
         ...task,
         attempts: task.attempts.map((other) => (other.number === 1 ? a : other)),
@@ -277,6 +285,9 @@ function reduce(
       };
       break;
     case "claim": {
+      if (task.queueStep?.seat && old.stage === "ready" && !old.review)
+        refuse("This attempt is queued for the project reviewer.");
+
       if (
         actor.kind !== "worker" ||
         !(old.stage === "ready" || (old.stage === "assigned" && old.owner === actor.id))
@@ -373,8 +384,8 @@ export function writeTask(
   actor: TaskActor,
   evidence: RecoveryEvidence = {},
 ) {
-  return guard(() => {
-    const db = connect(directory);
+  return taskLedgerOperation(() => {
+    const db = openTaskLedger(directory);
     try {
       db.exec("BEGIN IMMEDIATE");
       const current = lookup(db, project, edit.key);
@@ -452,6 +463,7 @@ export function writeTask(
 }
 
 export interface QueueAttempt {
+  reviewStatus?: string;
   projectId: ProjectId;
   key: string;
   title: string;
@@ -463,13 +475,14 @@ export interface QueueAttempt {
 }
 const decodeQueueStep = Schema.decodeUnknownSync(Schema.fromJsonString(QueueStep));
 export function readQueueAttempts(directory: string) {
-  return guard((): QueueAttempt[] => {
+  return taskLedgerOperation((): QueueAttempt[] => {
     if (!NodeFS.existsSync(NodePath.join(directory, "it3-tasks.sqlite"))) return [];
-    const db = connect(directory, true);
+    const db = openTaskLedger(directory, true);
     try {
       if (db.prepare("PRAGMA user_version").get()?.user_version === 0) return [];
       const rows = db
         .prepare(`SELECT t.project,t.key,json_extract(t.body,'$.title') title,
+        COALESCE(NULLIF(a.value ->> '$.reviewHold',''),a.value ->> '$.review.detail') review_state,
         json_extract(t.body,'$.queueStep') step,a.value ->> '$.number' attempt,a.value ->> '$.stage' stage,
         MAX(e.at, COALESCE((SELECT MAX(plan.at) FROM events plan WHERE plan.project=t.project AND plan.key=t.key AND plan.action='plan'),e.at),
           COALESCE((SELECT MAX(done.at) FROM json_each(t.body,'$.queueStep.dependencies') d
@@ -486,6 +499,7 @@ export function readQueueAttempts(directory: string) {
         key: String(r.key),
         title: String(r.title),
         attempt: Number(r.attempt),
+        ...(r.review_state ? { reviewStatus: String(r.review_state) } : {}),
         readySince: String(r.ready_since),
         stage: String(r.stage),
         step: r.step ? decodeQueueStep(String(r.step)) : null,

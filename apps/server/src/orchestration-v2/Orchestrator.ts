@@ -16056,6 +16056,33 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "message.dispatch": {
         const thread = yield* refuseNativeSubagentMessage(command);
+        if (command.reviewerOnly) {
+          const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+          const record = yield* projects.getShell(thread.projectId).pipe(mapDispatchError(command));
+          const project = settings.it3Workspaces?.projects?.[thread.projectId];
+          const routes = [project?.queuePolicy?.economy, project?.queuePolicy?.advanced];
+          if (
+            Option.isNone(record) ||
+            record.value.archivedAt ||
+            (project?.status ?? "active") !== "active" ||
+            project?.queuePolicy?.reviewer !== thread.id ||
+            !routes.some(
+              (route) =>
+                route &&
+                route.instanceId === command.modelSelection?.instanceId &&
+                route.model === command.modelSelection?.model,
+            ) ||
+            thread.interactionMode !== "plan" ||
+            (thread.runtimeMode !== "auto" && thread.runtimeMode !== "approval-required") ||
+            thread.modelSelection.instanceId !== command.modelSelection?.instanceId ||
+            thread.modelSelection.model !== command.modelSelection?.model
+          )
+            return yield* new OrchestratorCommandRejectedError({
+              commandId: command.commandId,
+              commandType: command.type,
+              cause: "Reviewer binding, permissions or model changed before delivery.",
+            });
+        }
         const guestSend =
           command.guestMessageId === undefined
             ? undefined

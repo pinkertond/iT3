@@ -49,7 +49,13 @@ function applicableWindows(provider: ServerProvider, model: string) {
   });
 }
 
-interface PreviewInput {
+export const reviewPool = (p: ServerProvider) =>
+  JSON.stringify([
+    p.driver,
+    p.auth.email?.toLowerCase() || p.usageLimits?.credentialFingerprint || p.instanceId,
+  ]);
+
+export interface PreviewInput {
   projects: readonly OrchestrationProjectShell[];
   settings: ServerSettings;
   attempts: readonly QueueAttempt[];
@@ -82,7 +88,7 @@ function projectSpend(report: UsageSummary) {
 }
 
 // Each candidate is evaluated as the single next step against the same observation.
-export function previewQueue(input: PreviewInput) {
+export function previewQueue(input: PreviewInput, limit = 12) {
   const { settings, providers, attempts, asOf } = input;
   const now = Date.parse(asOf),
     day = asOf.slice(0, 10);
@@ -90,14 +96,9 @@ export function previewQueue(input: PreviewInput) {
   const policyFor = (id: ProjectId) => settings.it3Workspaces?.projects?.[id]?.queuePolicy;
   const providerFor = (id: ProjectId, step: QueueAttempt["step"]) =>
     step && step.route !== "check" ? policyFor(id)?.[step.route]?.instanceId : undefined;
-  const pool = (p: ServerProvider) =>
-    JSON.stringify([
-      p.driver,
-      p.auth.email?.toLowerCase() || p.usageLimits?.credentialFingerprint || p.instanceId,
-    ]);
   const poolFor = (id: string | undefined) => {
     const p = providers.find((x) => x.instanceId === id);
-    return p && pool(p);
+    return p && reviewPool(p);
   };
   const settled = new Map(
     Array.from(input.reports).flatMap(([id, report]) =>
@@ -134,6 +135,15 @@ export function previewQueue(input: PreviewInput) {
       step = a.step;
     const priority = step?.priority ?? policy?.priority ?? "normal";
     const row: QueueDecision = {
+      ...(step?.seat
+        ? {
+            reviewer:
+              a.reviewStatus ??
+              (policy?.reviewer
+                ? "Awaiting dispatch check."
+                : "Bind the reviewer seat in Project queue policy."),
+          }
+        : {}),
       projectId: project.id,
       project: project.title,
       key: a.key,
@@ -250,7 +260,7 @@ export function previewQueue(input: PreviewInput) {
         "Today’s attributable project usage is incomplete or stale.",
         evidence,
       );
-    if (unknownPool || busyProjects.has(project.id) || busyPools.has(pool(provider)))
+    if (unknownPool || busyProjects.has(project.id) || busyPools.has(reviewPool(provider)))
       return decide(
         "usage",
         "An assigned or working attempt could use this capacity. Recheck after settlement.",
@@ -286,7 +296,7 @@ export function previewQueue(input: PreviewInput) {
         projection,
       );
     const reserve = priority === "urgent" ? 0 : policy.reservePercent / 100;
-    const floor = priority === "urgent" ? 0 : (poolFloors.get(pool(provider)) ?? 0);
+    const floor = priority === "urgent" ? 0 : (poolFloors.get(reviewPool(provider)) ?? 0);
     const protectedWindow = windows.find((w) => w.after < floor);
     if (protectedWindow)
       return decide(
@@ -325,6 +335,6 @@ export function previewQueue(input: PreviewInput) {
     day,
     eligible: decisions.filter((d) => d.row.reason === "ready").length,
     total: decisions.length,
-    rows: decisions.slice(input.offset, input.offset + 12).map((d) => d.row),
+    rows: decisions.slice(input.offset, input.offset + limit).map((d) => d.row),
   };
 }

@@ -403,6 +403,8 @@ function ProjectHome({
       : undefined;
   const canvasSupported =
     useServerConfigs().get(p.environmentId)?.environment.capabilities.it3WorkflowCanvas === true;
+  const reviewSupported =
+    useServerConfigs().get(p.environmentId)?.environment.capabilities.it3ReviewerDispatch === true;
   const queueSupported =
     useServerConfigs().get(p.environmentId)?.environment.capabilities.it3QueuePreview === true;
   const taskSupported =
@@ -558,6 +560,7 @@ function ProjectHome({
             key={JSON.stringify([query.task, query.assign])}
             project={p}
             threads={threads}
+            reviewSupported={reviewSupported}
             queueSupported={queueSupported}
             selected={query.task}
             thread={query.agent}
@@ -578,7 +581,11 @@ function ProjectHome({
           </p>
         )
       ) : view === "queue" && queueSupported ? (
-        <QueuePreview project={p} policy={config?.queuePolicy ?? null} />
+        <QueuePreview
+          reviewerChats={reviewSupported ? threads : undefined}
+          project={p}
+          policy={config?.queuePolicy ?? null}
+        />
       ) : view === "docs" ? (
         <ProjectLibrary project={p} node={node} onNode={onNode} />
       ) : view === "usage" ? (

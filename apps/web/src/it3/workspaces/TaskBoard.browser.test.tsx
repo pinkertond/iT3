@@ -3,6 +3,7 @@ import { render } from "../../../test/render";
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import type { Project } from "~/types";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
+import { QueueStepForm, QueuePolicyForm } from "./QueueForms";
 import { TaskBoard } from "./TaskBoard";
 const query = vi.hoisted(() => vi.fn());
 const mutate = vi.hoisted(() => vi.fn(async () => ({ _tag: "Success" })));
@@ -185,5 +186,63 @@ it("saves a deterministic queue step against the displayed revision", async () =
         }),
       }),
     }),
+  );
+});
+
+it("binds the reviewer seat and explicitly opts a model step into automatic dispatch", async () => {
+  const save = vi.fn();
+  await using screen = await render(
+    <>
+      <QueuePolicyForm
+        project={p}
+        reviewerChats={threads}
+        policy={{
+          priority: "normal",
+          dailyTokens: 500,
+          dailyUsd: 1,
+          contextTokens: 100,
+          reservePercent: 0,
+          economy: null,
+          advanced: null,
+        }}
+        onSaved={() => {}}
+      />
+      <QueueStepForm
+        step={{
+          next: "Review",
+          verification: "Check diff",
+          dependencies: [],
+          route: "economy",
+          priority: null,
+          inputTokens: 50,
+          outputTokens: 10,
+          estimatedUsd: 0.02,
+          windowPercent: 1,
+        }}
+        reviewSupported
+        busy={false}
+        onSave={save}
+      />
+    </>,
+  );
+  await screen.getByText("Project queue policy", { exact: false }).first().click();
+  await screen.getByRole("combobox", { name: /Reviewer seat/ }).selectOptions("new");
+  await screen.getByRole("button", { name: "Save queue policy" }).click();
+  expect(mutate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: {
+        patch: {
+          it3Workspaces: {
+            projects: { p: { queuePolicy: expect.objectContaining({ reviewer: "new" }) } },
+          },
+        },
+      },
+    }),
+  );
+  await screen.getByText("Queue step", { exact: false }).first().click();
+  await screen.getByRole("checkbox", { name: /Assign to Reviewer/ }).click();
+  await screen.getByRole("button", { name: "Save queue step" }).click();
+  expect(save).toHaveBeenCalledWith(
+    expect.objectContaining({ seat: "reviewer", route: "economy" }),
   );
 });
