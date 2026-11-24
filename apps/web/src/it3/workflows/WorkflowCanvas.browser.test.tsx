@@ -2,7 +2,12 @@ import { expect, it, vi } from "vite-plus/test";
 import { useState } from "react";
 import { render } from "../../../test/render";
 import { EnvironmentId } from "@t3tools/contracts";
-import { readCanvas } from "@t3tools/shared/it3WorkflowGraph";
+import {
+  readCanvas,
+  blankWorkflow,
+  canvasSource,
+  type CanvasGraph,
+} from "@t3tools/shared/it3WorkflowGraph";
 import WorkflowCanvas from "./WorkflowCanvas";
 import WorkflowDefinitionEditor from "~/components/workflows/WorkflowDefinitionEditor";
 vi.mock("~/components/workflows/WorkflowRunsView", () => ({ WorkflowsEmpty: () => null }));
@@ -10,7 +15,14 @@ vi.mock("~/components/DiffWorkerPoolProvider", () => ({ DiffWorkerPoolProvider: 
 vi.mock("~/state/entities", async (original) => ({
   ...(await original<object>()),
   useServerConfigs: () =>
-    new Map([["local", { environment: { capabilities: { it3WorkflowCanvas: true } } }]]),
+    new Map([
+      [
+        "local",
+        {
+          environment: { capabilities: { it3WorkflowCanvas: true, it3ComposableWorkflows: true } },
+        },
+      ],
+    ]),
   useProjects: () => [{ id: "proj", environmentId: "local", title: "Project sample" }],
 }));
 const captures = vi.hoisted(() => ({ save: vi.fn(), start: vi.fn() }));
@@ -58,7 +70,7 @@ vi.mock("~/state/query", async (original) => ({
     error: null,
   }),
 }));
-function Fixture() {
+function Fixture({ files = [] }: { files?: readonly { name: string; source: string }[] } = {}) {
   const [source, set] = useState<string | null>(null);
   captures.save.mockImplementation(async ({ input }) => {
     set(input.source);
@@ -68,6 +80,8 @@ function Fixture() {
   return (
     <div style={{ height: 600, width: 1000, display: "flex" }}>
       <WorkflowCanvas
+        definitionFiles={files}
+        composable
         env={EnvironmentId.make("local")}
         file="suite.flow.ts"
         source={source}
@@ -82,6 +96,7 @@ function Fixture() {
 }
 it("edits node labels and wiring, publishes the graph, runs it and opens recorded node evidence", async () => {
   await using screen = await render(<Fixture />, { router: "/workflows" });
+  await screen.getByRole("button", { name: "Use suite template" }).click();
   expect(screen.container.innerText).toContain("Selected node");
   await screen.getByLabelText("Selected node").selectOptions("review");
   await screen.getByLabelText("Node label").fill("Triage test failures?");
@@ -128,4 +143,58 @@ it("opens the editor from a project's native Definitions list", async () => {
   await screen.getByRole("button", { name: "Create", exact: true }).click();
   await expect.element(screen.getByRole("heading", { name: "build-review" })).toBeVisible();
   await expect.element(screen.getByLabelText("Selected node")).toBeVisible();
+});
+
+it("builds from a single input, configures reusable steps and publishes a connected workflow", async () => {
+  captures.save.mockClear();
+  await using screen = await render(<Fixture />, { router: "/workflows" });
+  await expect.element(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+  await screen
+    .getByRole("button", { name: "Add step after Workflow input (next)", exact: true })
+    .click();
+  await screen.getByRole("button", { name: "Set field", exact: true }).click();
+  await screen.getByLabelText("Field name").fill("queue");
+  await screen.getByRole("textbox", { name: "Value", exact: true }).fill("priority");
+  await screen.getByRole("button", { name: "Add step", exact: true }).click();
+  await screen.getByRole("button", { name: "Output", exact: true }).click();
+  await screen.getByRole("button", { name: "Arrange" }).click();
+  await screen.getByRole("button", { name: "Publish" }).click();
+  const saved = readCanvas(captures.save.mock.calls[0]![0].input.source)!;
+  expect(saved.format).toBe(2);
+  expect(saved.revisions[0]!.nodes.map((n) => n.kind)).toEqual(["start", "set", "result"]);
+  expect(saved.revisions[0]!.nodes[1]).toMatchObject({ field: "queue", literal: '"priority"' });
+  expect(saved.revisions[0]!.edges).toHaveLength(2);
+  await screen.getByRole("button", { name: "Run workflow" }).click();
+  await expect
+    .element(screen.getByRole("textbox", { name: "Workflow input (JSON object)" }))
+    .toBeVisible();
+});
+
+it("reuses a published project step with its settings and source revision", async () => {
+  captures.save.mockClear();
+  const sample = (projectId: string, name: string, label: string) => {
+    const d = blankWorkflow(name, projectId);
+    const graph: CanvasGraph = {
+      nodes: [...d.revisions[0]!.nodes, { id: "done", kind: "result", label }],
+      edges: [{ from: "start", port: "next", to: "done" }],
+    };
+    return { name: name + ".flow.ts", source: canvasSource({ ...d, revisions: [graph] }) };
+  };
+  await using screen = await render(
+    <Fixture
+      files={[
+        sample("proj", "shipping", "Return receipt"),
+        sample("other", "private", "Private result"),
+      ]}
+    />,
+    { router: "/workflows" },
+  );
+  await screen.getByRole("button", { name: "Add step", exact: true }).click();
+  await screen.getByRole("button", { name: "Project steps" }).click();
+  await expect.element(screen.getByText("Private result")).not.toBeInTheDocument();
+  await screen.getByRole("button", { name: /Return receipt/ }).click();
+  await screen.getByRole("button", { name: "Publish" }).click();
+  const node = readCanvas(captures.save.mock.calls[0]![0].input.source)?.revisions[0]?.nodes[1];
+  expect(node?.copiedFrom).toEqual({ workflow: "shipping", version: 1, node: "done" });
+  expect(node?.id).not.toBe("done");
 });

@@ -10,9 +10,13 @@ Workflows are a Labs feature, off by default. Turn on **Settings → Labs → Wo
 
 ## Build a visual workflow in iT3
 
-Open **Workspaces → project → Workflows → New visual workflow**. Give the definition a lowercase name and choose **Create**. The initial graph takes a suite report, checks completeness, branches on failed tests and can ask a person whether to prepare a diagnosis brief. Each path runs locally on the host and uses zero model calls.
+Open **Workspaces → project → Workflows → New visual workflow**. Give the definition a lowercase name and choose **Create**. Start with the input node and click **+** on its **Next** port. Choose **Set field**, **Condition**, **Approval**, or **Output**. Each new step connects to the port you picked. **Use suite template** loads an example for reviewing completed tests.
 
-Select a node to edit it. Drag between handles or use the inspector’s destination menus to connect it. **Publish** becomes available once every output has a destination and every node is reachable. **Run workflow** accepts the sample or your own JSON report. Use **Open native run** for a pending question. Select a visited node to inspect its result and evidence. **Inspect a previous run** reopens a recorded execution.
+For example, route an incoming request by adding a condition on the field `priority` with the text value `urgent`. Connect **Yes** to an approval and **No** to an output. Both approval paths also need a destination. To send multiple paths to the same output, drag from its source port to the output’s input handle or select the destination in the inspector.
+
+In **Add step → Project steps**, search by workflow or step name to reuse a published step from another workflow of the same format in this project. The new step copies its settings and records its source workflow, version and node ID. Later edits are independent.
+
+**Arrange** lays out the graph from input to output. **Publish** checks the configuration and connections. **Run workflow** takes a JSON object such as `{"priority":"urgent"}`. **Open native run** lets you answer a pending approval. Select a visited node to see its recorded result.
 
 The host saves a project-linked `<name>.flow.ts` file in the directory shown under **Definitions**. Two clients connected to the same host see its saved definitions. A semantic edit adds a version, and moving nodes only updates the layout. If another editor publishes first, reload the saved version before applying your changes. See [Visual project workflows](../design/agent-system/workflow-canvas.md) for the file format and supported nodes.
 

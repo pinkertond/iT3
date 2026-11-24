@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-const Kind = Schema.Literals(["start", "check", "branch", "review", "result"]);
+const Kind = Schema.Literals(["start", "check", "branch", "review", "result", "set"]);
 export type CanvasKind = typeof Kind.Type;
 const Predicate = Schema.Literals(["failed", "skipped"]);
 const identifier = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,79}$/));
@@ -9,8 +9,17 @@ const GraphNode = Schema.Struct({
   id: identifier,
   kind: Kind,
   label,
-  predicate: Predicate,
-  output: Schema.Literals(["summary", "brief"]),
+  predicate: Schema.optionalKey(Predicate),
+  output: Schema.optionalKey(Schema.Literals(["summary", "brief"])),
+  copiedFrom: Schema.optionalKey(
+    Schema.Struct({
+      workflow: identifier,
+      version: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
+      node: identifier,
+    }),
+  ),
+  field: Schema.optionalKey(Schema.String),
+  literal: Schema.optionalKey(Schema.String),
 });
 export type CanvasNode = typeof GraphNode.Type;
 const Port = Schema.Literals(["next", "yes", "no"]);
@@ -24,7 +33,7 @@ export type CanvasGraph = typeof Graph.Type;
 const Positions = Schema.Record(identifier, Schema.Struct({ x: Schema.Finite, y: Schema.Finite }));
 export type CanvasLayout = typeof Positions.Type;
 const Document = Schema.Struct({
-  format: Schema.Literal(1),
+  format: Schema.Literals([1, 2]),
   name: identifier,
   projectId: Schema.NullOr(label),
   revisions: Schema.Array(Graph).check(Schema.isMinLength(1)),
@@ -70,6 +79,42 @@ export function graphProblem(graph: CanvasGraph): string | null {
   if (!visit(starts[0]!.id))
     return "This version supports acyclic workflows. Remove the circular connection.";
   if (visited.size !== nodes.size) return "Connect every node to the start or remove unused nodes.";
+  return null;
+}
+
+export function blankWorkflow(name: string, projectId: string | null): CanvasDocument {
+  return {
+    format: 2,
+    name,
+    projectId,
+    revisions: [{ nodes: [{ id: "start", kind: "start", label: "Workflow input" }], edges: [] }],
+    layout: { start: { x: 0, y: 0 } },
+  };
+}
+
+export function configurationProblem(graph: CanvasGraph, format: 1 | 2): string | null {
+  for (const n of graph.nodes) {
+    if (format === 1) {
+      if (n.kind === "set" || n.predicate === undefined || n.output === undefined)
+        return "Invalid suite node configuration.";
+      continue;
+    }
+    if (n.kind === "check") return "Suite checks belong to the suite template.";
+    if (n.kind === "branch" || n.kind === "set") {
+      if (!n.field?.trim() || n.field.length > 160)
+        return "Enter a field name for " + n.label + ".";
+      try {
+        const value = JSON.parse(n.literal ?? "");
+        if (
+          (typeof value === "number" && !Number.isFinite(value)) ||
+          (value !== null && typeof value === "object")
+        )
+          return "Use a JSON string, number, boolean or null for " + n.label + ".";
+      } catch {
+        return "Enter a valid JSON value for " + n.label + ".";
+      }
+    }
+  }
   return null;
 }
 
@@ -163,15 +208,54 @@ for (const [index, graph] of canvas.revisions.entries()) {
   }));
 }
 `;
-const prefix = "// iT3 visual workflow v1\nconst canvas = ";
+// Format 1 keeps its original executable source for saved suite workflows.
+const genericInterpreter = `
+const payload = Schema.Record(Schema.String, Schema.Json);
+for (const [index, graph] of canvas.revisions.entries()) {
+  T3.workflow(canvas.name, {version:index+1,payload}, Effect.fn(function* (input) {
+    let data=input;
+    let node=graph.nodes.find(n=>n.kind==="start");
+    while(node){
+      let port="next";
+      const {id,kind,field,literal,label}=node;
+      if(kind==="start"){
+        data=yield* T3.step(id,{returns:Schema.Json},Effect.succeed(data));
+      }else if(kind==="set"){
+        data=yield* T3.step(id,{returns:Schema.Json},Effect.succeed({...data,[field]:JSON.parse(literal)}));
+      }else if(kind==="branch"){
+        const match=Object.hasOwn(data,field) && data[field]===JSON.parse(literal);
+        port=(yield* T3.step(id,{returns:Schema.Boolean},Effect.succeed(match)))?"yes":"no";
+      }else if(kind==="review"){
+        const answer=yield* T3.ask(id,{title:label,choices:["Yes","No"],data});
+        port=Option.isSome(answer) && answer.value.choice==="Yes"?"yes":"no";
+      }else if(kind==="result"){
+        return yield* T3.step(id,{returns:Schema.Json},Effect.succeed(data));
+      }
+      const edge=graph.edges.find(e=>e.from===id && e.port===port);
+      node=graph.nodes.find(n=>n.id===edge?.to);
+    }
+    return yield* T3.stop("Missing workflow destination");
+  }));
+}
+`;
+const formats = {
+  1: { prefix: "// iT3 visual workflow v1\nconst canvas = ", runtime: interpreter },
+  2: { prefix: "// iT3 visual workflow v2\nconst canvas = ", runtime: genericInterpreter },
+} as const;
 export function canvasSource(doc: CanvasDocument) {
-  return prefix + JSON.stringify(doc, null, 2) + ";\n" + interpreter;
+  const { prefix, runtime } = formats[doc.format];
+  return prefix + JSON.stringify(doc, null, 2) + ";\n" + runtime;
 }
 export function readCanvas(source: string): CanvasDocument | null {
-  if (!source.startsWith(prefix) || !source.endsWith(";\n" + interpreter)) return null;
+  const format = source.startsWith(formats[2].prefix) ? 2 : 1;
+  const { prefix, runtime } = formats[format];
+  if (!source.startsWith(prefix) || !source.endsWith(";\n" + runtime)) return null;
   try {
-    const doc = decode(JSON.parse(source.slice(prefix.length, -(2 + interpreter.length))));
-    return doc.revisions.every((g) => graphProblem(g) === null) ? doc : null;
+    const doc = decode(JSON.parse(source.slice(prefix.length, -(2 + runtime.length))));
+    return doc.format === format &&
+      doc.revisions.every((g) => !graphProblem(g) && !configurationProblem(g, format))
+      ? doc
+      : null;
   } catch {
     return null;
   }

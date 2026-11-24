@@ -1,21 +1,14 @@
 import { useRef, useState } from "react";
-import {
-  Background,
-  Controls,
-  Handle,
-  MarkerType,
-  Position,
-  ReactFlow,
-  type NodeProps,
-  type Node,
-  type Connection,
-} from "@xyflow/react";
+import { Background, Controls, Panel, MarkerType, ReactFlow, type Connection } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { T, useGT } from "gt-react";
 import { Link, useBlocker } from "@tanstack/react-router";
-import { ChevronRight, ClipboardCheck, GitBranch, Play, Square, UserRound } from "lucide-react";
+import { GitBranch, Play, Plus, Network, LayoutTemplate } from "lucide-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
+  blankWorkflow,
+  configurationProblem,
+  type CanvasKind,
   canvasSource,
   graphProblem,
   portsFor,
@@ -34,14 +27,9 @@ import { randomUUID } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import styles from "./workflowCanvas.module.css";
+import { StepLibrary } from "./StepLibrary";
 
-const icon = {
-  start: Play,
-  check: ClipboardCheck,
-  branch: GitBranch,
-  review: UserRound,
-  result: Square,
-};
+import { ScalarValue, WorkflowCard, arrangeNodes, nodeLibrary } from "./WorkflowNodes";
 const sample = JSON.stringify(
   {
     suite: "Unit tests",
@@ -53,43 +41,13 @@ const sample = JSON.stringify(
   null,
   2,
 );
-const kinds = ["check", "branch", "review", "result"] as const;
-type CardData = { node: CanvasNode; selected: boolean; status: string | null };
-function Card({ data }: NodeProps<Node<CardData>>) {
-  const { node, status, selected } = data,
-    Icon = icon[node.kind];
-  return (
-    <div
-      className={styles.card}
-      data-kind={node.kind}
-      data-selected={selected}
-      data-status={status ?? undefined}
-    >
-      {node.kind !== "start" && <Handle type="target" position={Position.Left} />}
-      <div className={styles.kicker}>
-        <Icon size={13} />
-        {node.kind}
-      </div>
-      <strong>{node.label}</strong>
-      {status && <small>{status}</small>}
-      {portsFor(node.kind).map((port, i) => (
-        <Handle
-          key={port}
-          id={port}
-          type="source"
-          position={Position.Right}
-          style={{ top: portsFor(node.kind).length === 1 ? "50%" : i === 0 ? "32%" : "74%" }}
-          title={port}
-        />
-      ))}
-    </div>
-  );
-}
-const nodeTypes = { card: Card };
+const nodeTypes = { card: WorkflowCard };
 const portLabels = { next: "Next", yes: "Yes", no: "No" };
 const fallbackPosition = (i: number) => ({ x: (i % 4) * 225, y: Math.floor(i / 4) * 150 });
 
 interface Props {
+  composable: boolean;
+  definitionFiles: readonly { readonly name: string; readonly source: string }[];
   env: EnvironmentId;
   file: string;
   source: string | null;
@@ -101,6 +59,8 @@ interface Props {
   onDeleted: () => void;
 }
 export default function WorkflowCanvas({
+  composable,
+  definitionFiles,
   env,
   file,
   source,
@@ -113,7 +73,8 @@ export default function WorkflowCanvas({
 }: Props) {
   const gt = useGT();
   const persisted = source === null ? null : readCanvas(source);
-  const initial = () => persisted ?? suiteTemplate(file.replace(/\.flow\.ts$/, ""), projectId);
+  const createBlank = composable ? blankWorkflow : suiteTemplate;
+  const initial = () => persisted ?? createBlank(file.replace(/\.flow\.ts$/, ""), projectId);
   const [doc, setDoc] = useState(initial),
     [graph, setGraph] = useState<CanvasGraph>(() => doc.revisions.at(-1)!);
   const [layout, setLayout] = useState(doc.layout),
@@ -125,8 +86,11 @@ export default function WorkflowCanvas({
   const [selected, select] = useState("start"),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
-  const [kind, setKind] = useState<(typeof kinds)[number]>("check"),
-    [payload, setPayload] = useState(sample),
+  const suite = doc.format === 1;
+  const library = nodeLibrary(gt, suite);
+  const [palette, setPalette] = useState<{ from: string; port: CanvasPort } | null>(null);
+  const fitCanvas = useRef<() => void>(() => {});
+  const [payload, setPayload] = useState(suite ? sample : '{\n  "status": "ready"\n}'),
     [runId, setRunId] = useState<string | null>(null);
   const [runForm, setRunForm] = useState(false);
   const released = useRef(false);
@@ -151,8 +115,7 @@ export default function WorkflowCanvas({
     !(writeEcho !== null && writeEcho.previous === source && writeEcho.saved === base);
   const unmanaged = source !== null && persisted?.name !== file.replace(/\.flow\.ts$/, "");
   const adopt = (text: string | null) => {
-    const next =
-      readCanvas(text ?? "") ?? suiteTemplate(file.replace(/\.flow\.ts$/, ""), projectId);
+    const next = readCanvas(text ?? "") ?? createBlank(file.replace(/\.flow\.ts$/, ""), projectId);
     setDoc(next);
     setGraph(next.revisions.at(-1)!);
     setLayout(next.layout);
@@ -177,7 +140,7 @@ export default function WorkflowCanvas({
   const shown = runData ? (doc.revisions[runData.run.version - 1] ?? graph) : graph;
   const steps = new Map(runData?.steps.map((s) => [s.name, s]));
   const node = shown.nodes.find((n) => n.id === selected) ?? shown.nodes[0]!;
-  const problem = graphProblem(graph);
+  const problem = configurationProblem(graph, doc.format) ?? graphProblem(graph);
   const locked = !writable || offline || busy || runId !== null;
   const patchNode = (patch: Partial<CanvasNode>) =>
     setGraph({
@@ -200,23 +163,58 @@ export default function WorkflowCanvas({
     )
       connect(c.source, c.sourceHandle as CanvasPort, c.target);
   };
-  const add = () => {
+  const origin = palette && graph.nodes.find((n) => n.id === palette.from);
+  const fit = () => requestAnimationFrame(() => fitCanvas.current());
+  const openPalette = (from: string, port: CanvasPort) => {
+    select(from);
+    setPalette({ from, port });
+  };
+  const add = (kind: CanvasKind, preset?: CanvasNode) => {
+    if (locked || !palette || !origin || graph.nodes.length >= 12) return;
+    const { from, port } = palette;
+    const onward = graph.edges.find((e) => e.from === from && e.port === port);
+    const first = portsFor(kind)[0];
+    if (onward && !first) return;
     const id = kind + "-" + randomUUID().slice(0, 8);
-    const position = layout[node.id] ?? { x: 0, y: 0 };
-    setLayout({ ...layout, [id]: { x: position.x + 40, y: position.y + 140 } });
-    setGraph({
-      ...graph,
-      nodes: [...graph.nodes, { id, kind, label: kind, predicate: "failed", output: "summary" }],
-    });
+    const label = kind === "review" ? gt("Approve this request?") : library[kind].title;
+    const created: CanvasNode = preset
+      ? { ...preset, id }
+      : suite
+        ? { id, kind, label, predicate: "failed", output: "summary" }
+        : kind === "branch" || kind === "set"
+          ? { id, kind, label, field: "status", literal: '"ready"' }
+          : { id, kind, label };
+    const edges = graph.edges.filter((e) => e !== onward);
+    edges.push({ from, port, to: id });
+    if (onward && first) edges.push({ from: id, port: first, to: onward.to });
+    const next = { nodes: [...graph.nodes, created], edges };
+    const start = layout[from] ?? { x: 0, y: 0 };
+    let y = start.y + (port === "no" ? 205 : 0);
+    const x = start.x + 265;
+    while (Object.values(layout).some((p) => Math.abs(p.x - x) < 205 && Math.abs(p.y - y) < 180))
+      y += 205;
+    setLayout({ ...layout, [id]: { x, y } });
+    setGraph(next);
     select(id);
+    setPalette(null);
+    fit();
   };
   const removeNode = () => {
     const positions = { ...layout };
     delete positions[node.id];
     setLayout(positions);
+    const successor = graph.edges.find((e) => e.from === node.id && e.port === "next")?.to;
+    const edges = graph.edges.filter((e) => e.from !== node.id && e.to !== node.id);
+    if (successor)
+      edges.push(
+        ...graph.edges
+          .filter((e) => e.to === node.id && e.from !== node.id && e.from !== successor)
+          .map((e) => ({ ...e, to: successor })),
+      );
+    setPalette(null);
     setGraph({
       nodes: graph.nodes.filter((n) => n.id !== node.id),
-      edges: graph.edges.filter((e) => e.from !== node.id && e.to !== node.id),
+      edges,
     });
     select("start");
   };
@@ -254,7 +252,11 @@ export default function WorkflowCanvas({
     try {
       input = JSON.parse(payload);
     } catch {
-      setMessage(gt("Enter a valid JSON report."));
+      setMessage(gt("Enter valid JSON."));
+      return;
+    }
+    if (!suite && (input === null || typeof input !== "object" || Array.isArray(input))) {
+      setMessage(gt("Enter a JSON object with named fields."));
       return;
     }
     const signature = JSON.stringify([latest, payload]);
@@ -383,7 +385,7 @@ export default function WorkflowCanvas({
           }}
         >
           <label>
-            <T>Suite report (JSON)</T>
+            {suite ? gt("Suite report (JSON)") : gt("Workflow input (JSON object)")}
             <textarea rows={5} value={payload} onChange={(e) => setPayload(e.target.value)} />
           </label>
           <Button type="submit" size="sm" disabled={locked || dirty || stale}>
@@ -394,12 +396,23 @@ export default function WorkflowCanvas({
       <div className={styles.body}>
         <div className={styles.stage}>
           <ReactFlow
+            onInit={(instance) => {
+              fitCanvas.current = () => {
+                void instance.fitView({ padding: 0.22, maxZoom: 1, duration: 200 });
+              };
+            }}
             nodes={shown.nodes.map((n, i) => ({
               id: n.id,
               type: "card",
               position: layout[n.id] ?? fallbackPosition(i),
               data: {
                 node: n,
+                suite,
+                open: portsFor(n.kind).filter(
+                  (port) => !shown.edges.some((e) => e.from === n.id && e.port === port),
+                ),
+                canInsert: !locked && graph.nodes.length < 12,
+                onInsert: (port: CanvasPort) => openPalette(n.id, port),
                 selected: n.id === node.id,
                 status: steps.get(n.id)?.status ?? null,
               },
@@ -409,11 +422,24 @@ export default function WorkflowCanvas({
               source: e.from,
               sourceHandle: e.port,
               target: e.to,
-              label: e.port === "next" ? undefined : portLabels[e.port],
-              markerEnd: { type: MarkerType.ArrowClosed },
+              style:
+                e.from === node.id || e.to === node.id
+                  ? { stroke: "var(--foreground)", strokeWidth: 2.2 }
+                  : {},
+              markerEnd: {
+                type: MarkerType.ArrowClosed,
+                color:
+                  e.from === node.id || e.to === node.id
+                    ? "var(--foreground)"
+                    : "var(--muted-foreground)",
+              },
             }))}
             nodeTypes={nodeTypes}
-            onNodeClick={(_, n) => select(n.id)}
+            onNodeClick={(_, n) => {
+              select(n.id);
+              setPalette(null);
+            }}
+            onPaneClick={() => setPalette(null)}
             onConnect={wire}
             onNodesChange={(changes) => {
               if (!locked)
@@ -435,22 +461,122 @@ export default function WorkflowCanvas({
             minZoom={0.25}
             maxZoom={2}
           >
+            <Panel position="top-left" className={styles.toolbox}>
+              <div className={styles.tools}>
+                <button
+                  type="button"
+                  disabled={locked || graph.nodes.length >= 12}
+                  onClick={() => {
+                    if (palette) {
+                      setPalette(null);
+                      return;
+                    }
+                    const anchor = portsFor(node.kind).length
+                      ? node
+                      : shown.nodes.find((n) => n.kind === "start")!;
+                    const ports = portsFor(anchor.kind);
+                    openPalette(
+                      anchor.id,
+                      ports.find(
+                        (port) => !graph.edges.some((e) => e.from === anchor.id && e.port === port),
+                      ) ?? ports[0]!,
+                    );
+                  }}
+                >
+                  <Plus size={16} />
+                  <T>Add step</T>
+                </button>
+                <button
+                  type="button"
+                  disabled={locked || graph.nodes.length < 2}
+                  onClick={() => {
+                    setLayout(arrangeNodes(graph));
+                    fit();
+                  }}
+                >
+                  <Network size={15} />
+                  <T>Arrange</T>
+                </button>
+                {base === null && suite && composable && (
+                  <button
+                    type="button"
+                    disabled={locked}
+                    onClick={async () => {
+                      if (
+                        modified &&
+                        !(await requestConfirmDialog(
+                          gt("Replace this draft with a blank workflow?"),
+                        ))
+                      )
+                        return;
+                      const blank = blankWorkflow(doc.name, projectId);
+                      setDoc(blank);
+                      setGraph(blank.revisions[0]!);
+                      setLayout(blank.layout);
+                      select("start");
+                      setPayload("{}");
+                      setPalette(null);
+                      fit();
+                    }}
+                  >
+                    <Plus size={15} />
+                    <T>Start blank</T>
+                  </button>
+                )}
+                {base === null && !modified && !suite && (
+                  <button
+                    type="button"
+                    disabled={locked}
+                    onClick={() => {
+                      const template = suiteTemplate(doc.name, projectId);
+                      setDoc(template);
+                      setGraph(template.revisions[0]!);
+                      setLayout(arrangeNodes(template.revisions[0]!));
+                      setPayload(sample);
+                      setPalette(null);
+                      fit();
+                    }}
+                  >
+                    <LayoutTemplate size={15} />
+                    <T>Use suite template</T>
+                  </button>
+                )}
+              </div>
+              {palette && origin && !locked && (
+                <StepLibrary
+                  key={origin.id + "/" + palette.port}
+                  definitionFiles={definitionFiles}
+                  projectId={doc.projectId}
+                  suite={suite}
+                  connection={origin.label + " → " + portLabels[palette.port]}
+                  occupied={graph.edges.some(
+                    (e) => e.from === origin.id && e.port === palette.port,
+                  )}
+                  add={add}
+                  close={() => setPalette(null)}
+                />
+              )}
+            </Panel>
             <Background gap={20} size={1} />
             <Controls showInteractive={false} />
           </ReactFlow>
         </div>
         <aside className={styles.inspector}>
-          <div className={styles.kicker}>
-            <T>Inspector</T>
-            <ChevronRight size={12} />
-            {node.kind}
+          <div className={styles.inspectorTitle}>
+            <strong>{library[node.kind].title}</strong>
+            <span>
+              <T>Inspector</T>
+            </span>
           </div>
           <label>
             <T>Selected node</T>
             <select
               aria-label={gt("Selected node")}
               value={node.id}
-              onChange={(e) => select(e.target.value)}
+              onChange={(e) => {
+                select(e.target.value);
+                setPalette(null);
+              }}
             >
               {shown.nodes.map((n) => (
                 <option key={n.id} value={n.id}>
@@ -468,7 +594,7 @@ export default function WorkflowCanvas({
               onChange={(e) => patchNode({ label: e.target.value })}
             />
           </label>
-          {node.kind === "result" && (
+          {suite && node.kind === "result" && (
             <label>
               <T>Result format</T>
               <select
@@ -487,7 +613,7 @@ export default function WorkflowCanvas({
               </select>
             </label>
           )}
-          {node.kind === "branch" && (
+          {suite && node.kind === "branch" && (
             <label>
               <T>Condition</T>
               <select
@@ -505,6 +631,39 @@ export default function WorkflowCanvas({
                 </option>
               </select>
             </label>
+          )}
+          {node.copiedFrom && (
+            <small className={styles.origin}>
+              {gt("Copied from {workflow}, version {version}", {
+                workflow: node.copiedFrom.workflow,
+                version: node.copiedFrom.version,
+              })}{" "}
+              · {node.copiedFrom.node}
+            </small>
+          )}
+          {!suite && (node.kind === "set" || node.kind === "branch") && (
+            <>
+              <label>
+                <T>Field name</T>
+                <input
+                  value={node.field ?? ""}
+                  disabled={locked}
+                  maxLength={160}
+                  onChange={(e) => patchNode({ field: e.target.value })}
+                />
+              </label>
+              <ScalarValue
+                literal={node.literal ?? '""'}
+                label={node.kind === "branch" ? gt("Equals") : gt("Value")}
+                disabled={locked}
+                onChange={(literal) => patchNode({ literal })}
+              />
+            </>
+          )}
+          {portsFor(node.kind).length > 0 && (
+            <h3 className={styles.sectionLabel}>
+              <T>Connections</T>
+            </h3>
           )}
           {portsFor(node.kind).map((port) => (
             <label key={port}>
@@ -557,28 +716,6 @@ export default function WorkflowCanvas({
                   <T>Remove node</T>
                 </Button>
               )}
-              <section>
-                <label>
-                  <T>Node type</T>
-                  <select
-                    disabled={locked}
-                    value={kind}
-                    onChange={(e) => setKind(e.target.value as typeof kind)}
-                  >
-                    {kinds.map((k) => (
-                      <option key={k}>{k}</option>
-                    ))}
-                  </select>
-                </label>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={locked || graph.nodes.length >= 12}
-                  onClick={add}
-                >
-                  <T>Add node</T>
-                </Button>
-              </section>
               {recent.length > 0 && (
                 <section>
                   <label>
@@ -606,7 +743,13 @@ export default function WorkflowCanvas({
                   </label>
                 </section>
               )}
-              {problem && <p role="status">{problem}</p>}
+              {problem && (
+                <p className={styles.validation} role="status">
+                  {graph.nodes.length === 1
+                    ? gt("Choose Add step to connect your first step.")
+                    : problem}
+                </p>
+              )}
               {onDelete && (
                 <Button
                   size="sm"

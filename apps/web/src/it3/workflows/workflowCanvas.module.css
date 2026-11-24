@@ -108,40 +108,212 @@
   text-decoration: underline;
   font-size: 0.8rem;
 }
-.card {
-  width: 166px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
+
+.stage {
+  background: color-mix(in srgb, var(--background) 87%, var(--muted-foreground));
+}
+.stage :global(.react-flow__edge-path) {
+  stroke-width: 1.8;
+}
+.toolbox {
+  max-width: calc(100% - 20px);
+}
+.tools,
+.palette {
   background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 4px 18px #10182812;
+}
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  padding: 3px;
+  gap: 2px;
+  width: fit-content;
+}
+.tools button,
+.paletteHead button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.tools button:first-child {
+  background: var(--foreground);
+  color: var(--background);
+}
+.tools button:disabled,
+.choice:disabled {
+  opacity: 0.44;
+}
+.tools button:not(:disabled):hover,
+.choice:not(:disabled):hover,
+.paletteHead button:hover {
+  background: var(--muted);
   color: var(--foreground);
-  padding: 10px 12px;
-  box-shadow: 0 2px 5px #0001;
+}
+.palette {
+  padding: 8px;
+  margin-top: 6px;
+  width: min(250px, 100%);
+}
+.paletteHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 6px;
+  font-size: 13px;
+}
+.palette p {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin: 0 6px 6px;
+  overflow-wrap: anywhere;
+}
+.choice {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  padding: 7px;
+  border-radius: 8px;
+}
+.choice strong,
+.choice small {
+  display: block;
+}
+.choice strong {
+  font-size: 13px;
+}
+.choice small {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.card,
+.choice {
+  --tone: light-dark(#196b60, #70d7bb);
+}
+:is(.card, .choice)[data-kind="set"],
+:is(.card, .choice)[data-kind="check"] {
+  --tone: light-dark(#1a65b2, #83baff);
+}
+:is(.card, .choice)[data-kind="branch"] {
+  --tone: light-dark(#996316, #f3c371);
+}
+:is(.card, .choice)[data-kind="review"] {
+  --tone: light-dark(#8047a1, #d7a5f4);
+}
+:is(.card, .choice)[data-kind="result"] {
+  --tone: light-dark(#475c87, #a6bce7);
+}
+.card {
+  width: 194px;
+  border: 1px solid color-mix(in srgb, var(--tone) 38%, var(--border));
+  border-radius: 12px;
+  background: linear-gradient(
+    138deg,
+    color-mix(in srgb, var(--tone) 7%, var(--background)),
+    var(--background) 65%
+  );
+  color: var(--foreground);
+  box-shadow:
+    0 2px 4px #10182812,
+    0 8px 16px #10182808;
+  padding: 11px 12px 9px;
+  position: relative;
+}
+.card[data-selected="true"] {
+  border-color: var(--tone);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--tone) 20%, transparent),
+    0 4px 10px #10182815;
+}
+.cardType {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 650;
+  font-size: 10px;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  color: var(--tone);
+}
+.tile {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  border-radius: 8px;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 13%, var(--background));
 }
 .card strong {
   display: block;
-  margin-top: 5px;
-  font-size: 13px;
-  line-height: 1.3;
+  font-size: 14px;
+  line-height: 1.25;
+  margin: 8px 0 3px;
+  font-weight: 650;
 }
-.card[data-selected="true"] {
-  outline: 2px solid var(--ring);
+.detail {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .card small {
   font-size: 10px;
+  display: block;
+  font-weight: 600;
+  margin-top: 5px;
 }
-.card[data-status="completed"] {
-  border-color: #347858;
+.sockets {
+  margin: 8px -12px -5px;
+  padding: 3px 0 1px;
+  border-top: 1px solid var(--border);
 }
-.card[data-kind="branch"] svg {
-  color: #946421;
+.socket {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 5px;
+  padding: 0 11px;
+  height: 21px;
+  color: var(--muted-foreground);
+  font-size: 10px;
 }
-.card[data-kind="review"] svg {
-  color: #8a60b0;
+.socket button {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  color: var(--tone);
+  border-radius: 5px;
+  width: 18px;
+  height: 18px;
+  background: var(--background);
+}
+.socket button:hover {
+  background: var(--muted);
 }
 .card :global(.react-flow__handle) {
-  width: 9px;
-  height: 9px;
-  background: var(--muted-foreground);
+  width: 10px;
+  height: 10px;
+  background: var(--tone);
+  border: 2px solid var(--background);
+}
+.card .inlet {
+  background: var(--background);
+  border: 2px solid var(--tone);
 }
 @media (max-width: 760px) {
   .body {
@@ -161,4 +333,84 @@
 }
 .card:focus-within {
   outline: 2px solid var(--ring);
+}
+
+.validation {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  padding: 8px 10px;
+  border-inline-start: 2px solid var(--border);
+}
+
+.libraryTabs {
+  display: flex;
+  gap: 2px;
+  margin: 5px 0;
+  padding: 2px;
+  background: var(--muted);
+  border-radius: 7px;
+}
+.libraryTabs button {
+  flex: 1;
+  padding: 4px;
+  font-size: 11px;
+  border-radius: 5px;
+}
+.libraryTabs [aria-pressed="true"] {
+  background: var(--background);
+  font-weight: 650;
+  box-shadow: 0 1px 3px #0001;
+}
+.palette {
+  max-height: min(430px, 49vh);
+  overflow-y: auto;
+}
+.palette input {
+  font-size: 12px;
+  margin: 5px 0;
+}
+.origin {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.socket button[data-connected="true"] {
+  opacity: 0;
+}
+.card:hover .socket button,
+.card:focus-within .socket button {
+  opacity: 1;
+}
+.valueEditor {
+  display: grid;
+  grid-template-columns: 1fr 1.1fr;
+  gap: 8px;
+}
+.inspectorTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+}
+.inspectorTitle strong {
+  font-size: 16px;
+}
+.inspectorTitle span,
+.sectionLabel {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.sectionLabel {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.socketButton {
+  composes: nodrag nopan from global;
 }

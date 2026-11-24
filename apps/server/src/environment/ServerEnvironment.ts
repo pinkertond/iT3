@@ -280,6 +280,7 @@ export const make = Effect.gen(function* () {
       projectOrganization: true,
       it3Workspaces: true,
       it3WorkflowCanvas: true,
+      it3ComposableWorkflows: true,
       it3QueuePreview: true,
       it3Tasks: true,
       it3AgentView: true,

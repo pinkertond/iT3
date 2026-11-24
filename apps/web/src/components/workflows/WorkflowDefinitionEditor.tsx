@@ -375,8 +375,8 @@ export default function WorkflowDefinitionEditor({
   const project = useProjects().find(
     (p) => p.id === projectId && p.environmentId === environmentId,
   );
-  const supported =
-    useServerConfigs().get(environmentId)?.environment.capabilities.it3WorkflowCanvas === true;
+  const capabilities = useServerConfigs().get(environmentId)?.environment.capabilities;
+  const supported = capabilities?.it3WorkflowCanvas === true;
   const gt = useGT();
   const [newCanvas, setNewCanvas] = useState(false);
   const [nameError, setNameError] = useState("");
@@ -505,6 +505,8 @@ export default function WorkflowDefinitionEditor({
             }
           >
             <WorkflowCanvas
+              definitionFiles={files}
+              composable={capabilities?.it3ComposableWorkflows === true}
               key={file}
               env={environmentId}
               file={file}

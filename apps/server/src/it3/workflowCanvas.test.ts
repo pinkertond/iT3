@@ -4,6 +4,9 @@ import { assert, it } from "@effect/vitest";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
   canvasSource,
+  blankWorkflow,
+  configurationProblem,
+  type CanvasGraph,
   graphProblem,
   readCanvas,
   reviseCanvas,
@@ -88,6 +91,54 @@ it.effect(
       const active = yield* Effect.gen(function* () {
         const files = yield* WorkflowRuntime.WorkflowDefinitions,
           engine = yield* Workflows.Workflows;
+        const blank = blankWorkflow("routing", "p");
+        const routing: CanvasGraph = {
+          nodes: [
+            ...blank.revisions[0]!.nodes,
+            {
+              id: "route",
+              kind: "branch",
+              label: "Urgent?",
+              field: "priority",
+              literal: '"urgent"',
+            },
+            { id: "mark", kind: "set", label: "Assign queue", field: "queue", literal: '"fast"' },
+            { id: "done", kind: "result", label: "Return request" },
+          ],
+          edges: [
+            { from: "start", port: "next", to: "route" },
+            { from: "route", port: "yes", to: "mark" },
+            { from: "route", port: "no", to: "done" },
+            { from: "mark", port: "next", to: "done" },
+          ],
+        };
+        const generic = { ...blank, revisions: [routing] };
+        assert.deepEqual(readCanvas(canvasSource(generic)), generic);
+        assert.isNotNull(
+          configurationProblem(
+            {
+              ...routing,
+              nodes: routing.nodes.map((n) =>
+                n.id === "mark" ? { ...n, literal: "invalid JSON" } : n,
+              ),
+            },
+            2,
+          ),
+        );
+        assert.isTrue((yield* files.save("routing.flow.ts", canvasSource(generic), null)).changed);
+        for (const priority of ["urgent", "normal"]) {
+          const launched = yield* engine.start(
+            "routing",
+            { priority },
+            { idempotencyKey: priority },
+          );
+          const completed = yield* engine.waitFor(launched.runId, (r) => r.status !== "running");
+          assert.equal(completed.status, "completed");
+          assert.deepEqual(
+            completed.result,
+            priority === "urgent" ? { priority, queue: "fast" } : { priority },
+          );
+        }
         assert.deepEqual(yield* files.save(file, v1, null), { changed: true, problems: [] });
         assert.isFalse((yield* files.save(file, v1, null)).changed);
         const run = yield* engine.start(doc.name, report, { idempotencyKey: "red", version: 1 });
