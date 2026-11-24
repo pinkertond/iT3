@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- stable, opaque pool and native command identities.
 import * as NodeCrypto from "node:crypto";
 import {
+  TaskLedgerError,
   CommandId,
   MessageId,
   RunId,
@@ -20,6 +21,8 @@ import { forkParked } from "../serverActivation.ts";
 import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
 import { OrchestratorV2 } from "../orchestration-v2/Orchestrator.ts";
 import { UsageService } from "../usage/UsageService.ts";
+import { initialGuard, guardedPrompt, applyGuardedAnswer, runGuardedTurn } from "./guardedTurn.ts";
+import { readTask } from "./taskLedger.ts";
 import { makeQueueReader } from "./queueReader.ts";
 import { previewQueue, reviewPool, type PreviewInput } from "./queuePreview.ts";
 import {
@@ -105,6 +108,7 @@ function measuredReviewUsage(turns: readonly OrchestrationV2ProviderTurn[]) {
   return { tokens, records };
 }
 type ReviewServices = {
+  guardedTurn?: typeof runGuardedTurn;
   path: string;
   threads: Pick<ThreadManagementService["Service"], "getThreadShell" | "sendToThread">;
   engine: Pick<OrchestratorV2["Service"], "getThreadRecords">;
@@ -117,6 +121,7 @@ type ReviewServices = {
 };
 export const reviewerTick = Effect.fn("it3.review.tick")(function* ({
   path,
+  guardedTurn = runGuardedTurn,
   threads,
   engine,
   usage,
@@ -268,7 +273,33 @@ export const reviewerTick = Effect.fn("it3.review.tick")(function* ({
           ]),
         );
       const messageId = MessageId.make("it3-review-" + id);
-      if (receipt) {
+      const guard = j.task.queueStep?.guarded;
+      if (guard && receipt?.phase === "running") {
+        if (Date.parse(input.asOf) - Date.parse(j.attempt.updated) > 180000) {
+          const detail =
+            "Interrupted guarded turn. Inspect the task before starting a new attempt. Its charge is reserved.";
+          const state = j.attempt.guarded!;
+          yield* save(
+            j,
+            {
+              guarded: {
+                ...state,
+                stopped: true,
+                history: [
+                  ...state.history,
+                  { ...receipt, phase: "failed", finished: input.asOf, detail },
+                ],
+              },
+              stage: "ready",
+              next: detail,
+              reviewHold: detail,
+            },
+            detail,
+          );
+        }
+        return;
+      }
+      if (receipt && !guard) {
         const history = yield* engine.getThreadRecords(receipt.thread, ["messages"], {
           messageIds: [messageId],
         });
@@ -378,7 +409,14 @@ export const reviewerTick = Effect.fn("it3.review.tick")(function* ({
         return;
       }
       if (row.reason !== "ready") {
-        yield* hold(j, row.detail);
+        const reset = row.windows
+          .filter(
+            (w) => w.reset && w.after < (row.priority === "urgent" ? 0 : policy!.reservePercent),
+          )
+          .map((w) => w.reset!)
+          .sort()
+          .at(-1);
+        yield* hold(j, row.detail + (reset ? " Window resets " + reset + "." : ""));
         return;
       }
       const shell = yield* threads.getThreadShell(seat);
@@ -386,6 +424,62 @@ export const reviewerTick = Effect.fn("it3.review.tick")(function* ({
       if (why) {
         yield* hold(j, why);
         return;
+      }
+      const root = input.projects.find((p) => p.id === j.project)?.workspaceRoot;
+      if (
+        guard &&
+        (!root ||
+          provider?.driver !== "claudeAgent" ||
+          route.instanceId !== "claudeAgent" ||
+          !provider.auth.email ||
+          !step.estimatedUsd ||
+          input.settings.providerInstances[route.instanceId]?.environment?.length)
+      ) {
+        yield* hold(
+          j,
+          "Protected turns require the default signed-in Claude instance, matching account, and a per-turn USD limit.",
+        );
+        return;
+      }
+      let state = j.attempt.guarded;
+      let prompt = "";
+      if (guard) {
+        const parent = j.task.basedOn
+          ? (yield* readTask(path, j.project, j.task.basedOn)).brief
+          : null;
+        const selected = parent?.attempts.find((a) => a.number === parent.accepted);
+        if (j.task.basedOn && !selected) {
+          yield* hold(j, "The selected design evidence is unavailable.");
+          return;
+        }
+        const concept =
+          selected && parent
+            ? {
+                task: parent.key,
+                attempt: selected.number,
+                summary: selected.checkpoint,
+                verification: selected.verification,
+                reference: parent.reference,
+              }
+            : undefined;
+        const packet = yield* Effect.try({
+          try: () => {
+            const current = state ?? initialGuard(root!);
+            const text = guardedPrompt(root!, j.task, current, concept);
+            if (Buffer.byteLength(text) > step.inputTokens)
+              throw Error(
+                "Increase the input estimate or narrow the selected files. The packet exceeds the conservative input allowance.",
+              );
+            return { state: current, prompt: text };
+          },
+          catch: (e) => new TaskLedgerError({ detail: String(e).slice(0, 500) }),
+        }).pipe(Effect.result);
+        if (packet._tag === "Failure") {
+          yield* hold(j, packet.failure.detail);
+          return;
+        }
+        state = packet.success.state;
+        prompt = packet.success.prompt;
       }
       if (!receipt) {
         receipt = {
@@ -420,6 +514,7 @@ export const reviewerTick = Effect.fn("it3.review.tick")(function* ({
           j,
           {
             review: receipt,
+            ...(state ? { guarded: state } : {}),
             reviewHold: "",
             owner: seat,
             ownerTitle: shell!.title,
@@ -433,6 +528,7 @@ export const reviewerTick = Effect.fn("it3.review.tick")(function* ({
           yield* time,
           {
             watermark,
+            observedGuarded: input.guardedSpend?.get(j.project),
             checkedAt: row.checkedAt!,
             usageAt: input.reports.get(j.project)!.readAt,
             tokenLimit:
@@ -459,6 +555,67 @@ export const reviewerTick = Effect.fn("it3.review.tick")(function* ({
           (receipt.spentBeforeUsd ?? 0) + (receipt.reservedUsd ?? 0) > policy!.dailyUsd * spendable)
       ) {
         yield* hold(j, "The current daily limit no longer covers the reserved review.");
+        return;
+      }
+      if (guard && state) {
+        const running: ReviewReceipt = {
+          ...receipt,
+          phase: "running",
+          detail: "Running protected " + state.role,
+        };
+        const claimed = yield* save(
+          j,
+          { review: running, stage: "working", reviewHold: "" },
+          running.detail,
+        );
+        if (claimed !== true) return;
+        const runningJob = { ...j, attempt: { ...j.attempt, revision: j.attempt.revision + 1 } };
+        const response = yield* Effect.tryPromise({
+          try: () => guardedTurn(prompt, route.model, step.estimatedUsd!, provider!.auth.email!),
+          catch: (e) => new TaskLedgerError({ detail: String(e).slice(0, 500) }),
+        }).pipe(Effect.result);
+        const result = response._tag === "Success" ? response.success : null;
+        const currentState = state;
+        const outcome = yield* Effect.try({
+          try: () => {
+            if (response._tag === "Failure") throw response.failure;
+            if (currentState.history.some((h) => h.run === response.success.session))
+              throw Error("Independent roles require fresh provider sessions.");
+            return applyGuardedAnswer(root!, j.task, currentState, response.success.answer, id);
+          },
+          catch: (e) => new TaskLedgerError({ detail: String(e).slice(0, 1000) }),
+        }).pipe(Effect.result);
+        const failed = outcome._tag === "Failure";
+        const {
+          state: next,
+          approved,
+          detail,
+        } = outcome._tag === "Success"
+          ? outcome.success
+          : { state: { ...state, stopped: true }, approved: false, detail: outcome.failure.detail };
+        const finished = yield* time;
+        const settled: ReviewReceipt = {
+          ...running,
+          phase: failed ? "failed" : "completed",
+          finished,
+          detail: state.role + " · " + detail,
+          run: result?.session ?? null,
+          tokens: result?.tokens ?? null,
+          pricedUsd: result?.usd ?? null,
+        };
+        yield* save(
+          runningJob,
+          {
+            guarded: { ...next, approved, history: [...state.history, settled] },
+            stage: "ready",
+            owner: null,
+            delivery: "none",
+            checkpoint: detail,
+            next: next.stopped ? detail : "Awaiting protected " + next.role,
+            reviewHold: next.stopped ? detail : "",
+          },
+          settled.detail,
+        );
         return;
       }
       const sent = yield* threads.sendToThread({
@@ -499,6 +656,8 @@ export const reviewerTick = Effect.fn("it3.review.tick")(function* ({
     yield* process.pipe(
       Effect.catch((error) => hold(j, "Reviewer dispatch: " + String(error).slice(0, 350))),
     );
+    // A restricted inference can last minutes. Refresh the queue before admitting another job.
+    if (j.task.queueStep?.guarded && j.attempt.review?.phase === "reserved") break;
   }
 });
 export const startReviewer = Effect.gen(function* () {

@@ -49,6 +49,7 @@ export function QueuePreview({
     };
   }, [refresh, read, diagnostics]);
   const data = q.data;
+  const guardedSpend = data?.guardedSpend?.find((r) => r.projectId === project.id);
   if (!read || !diagnostics)
     return (
       <p>
@@ -71,6 +72,15 @@ export function QueuePreview({
           that step ran next. Previewing starts no work.
         </T>
       </p>
+      {guardedSpend && (
+        <p>
+          <strong>
+            <T>Protected turns today</T>
+          </strong>{" "}
+          · {guardedSpend.tokens.toLocaleString()} <T>tokens</T> · ${guardedSpend.usd.toFixed(4)}{" "}
+          {guardedSpend.estimated && <T>Includes outstanding estimates</T>}
+        </p>
+      )}
       <QueuePolicyForm
         reviewerChats={reviewerChats}
         project={project}

@@ -9,7 +9,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as UsageService from "../usage/UsageService.ts";
 import { readProjectUsageOwners } from "./projectUsage.ts";
 import { activeQueueProjects } from "./queuePreview.ts";
-import { readQueueAttempts } from "./taskLedger.ts";
+import { readGuardedSpend, readQueueAttempts } from "./taskLedger.ts";
 export const makeQueueReader = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig,
     projectStore = yield* ProjectStore.ProjectStoreV2,
@@ -61,6 +61,7 @@ export const makeQueueReader = Effect.gen(function* () {
     );
     return {
       projects,
+      guardedSpend: yield* readGuardedSpend(config.stateDir, day),
       settings,
       attempts,
       providers,

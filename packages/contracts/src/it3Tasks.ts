@@ -44,6 +44,19 @@ const ReviewReceipt = Schema.Struct({
 });
 export type ReviewReceipt = typeof ReviewReceipt.Type;
 export const TaskAttempt = Schema.Struct({
+  guarded: Schema.optionalKey(
+    Schema.Struct({
+      base: Schema.String,
+      candidate: Schema.String,
+      role: Schema.Literals(["builder", "reviewer", "test-maintainer"]),
+      round: NonNegativeInt,
+      contest: Schema.String,
+      testPath: Schema.String,
+      history: Schema.Array(ReviewReceipt),
+      approved: Schema.optionalKey(Schema.Boolean),
+      stopped: Schema.Boolean,
+    }),
+  ),
   reviewHold: Schema.optionalKey(Schema.String),
   review: Schema.optionalKey(ReviewReceipt),
   number: Schema.Literals([1, 2]),
@@ -67,6 +80,8 @@ export const TaskAttempt = Schema.Struct({
 });
 export type TaskAttempt = typeof TaskAttempt.Type;
 export const TaskBrief = Schema.Struct({
+  basedOn: Schema.optionalKey(key),
+  protectedImplementation: Schema.optionalKey(Schema.Literal(true)),
   queueStep: Schema.optionalKey(QueueStep),
   key,
   title: short,
@@ -92,6 +107,8 @@ const workerActions = [
 const TaskAction = Schema.Union([
   Schema.Struct({
     action: Schema.Literal("create"),
+    basedOn: Schema.optionalKey(key),
+    protectedImplementation: Schema.optionalKey(Schema.Literal(true)),
     title: short,
     request: note,
     reference: Schema.String.check(Schema.isMaxLength(1000)),
@@ -103,6 +120,7 @@ const TaskAction = Schema.Union([
   Schema.Struct({ action: Schema.Literal("plan"), step: Schema.NullOr(QueueStep) }),
   ...workerActions,
   Schema.Struct({ action: Schema.Literal("notify") }),
+  Schema.Struct({ action: Schema.Literal("verifyCandidate"), commit: short, evidence: note }),
   Schema.Struct({ action: Schema.Literal("accept") }),
 ]);
 export const TaskEdit = Schema.Struct({

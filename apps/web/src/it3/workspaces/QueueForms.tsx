@@ -218,18 +218,25 @@ export function QueuePolicyForm({
 }
 
 export function QueueStepForm({
+  protectionRequired,
+  guardedSupported,
   step,
   busy,
   onSave,
   reviewSupported = false,
 }: {
+  protectionRequired?: boolean | undefined;
+  guardedSupported?: boolean | undefined;
   reviewSupported?: boolean | undefined;
   step: QueueStep | null;
   busy: boolean;
   onSave: (step: QueueStep | null) => void;
 }) {
   const gt = useGT();
-  const [route, setRoute] = useState<QueueStep["route"]>(step?.route ?? "check");
+  const [route, setRoute] = useState<QueueStep["route"]>(
+    step?.route ?? (protectionRequired ? "economy" : "check"),
+  );
+  const [guard, setGuard] = useState(!!protectionRequired || !!step?.guarded);
   return (
     <details>
       <summary>
@@ -245,8 +252,25 @@ export function QueueStepForm({
           onSave({
             next: field(d, "next"),
             verification: field(d, "verification"),
-            ...(reviewSupported && route !== "check" && d.has("reviewer")
+            ...(reviewSupported &&
+            route !== "check" &&
+            (d.has("reviewer") || (guardedSupported && guard))
               ? { seat: "reviewer" as const }
+              : {}),
+            ...(reviewSupported && guardedSupported && guard && route !== "check"
+              ? {
+                  guarded: {
+                    source: field(d, "sourcePaths")
+                      .split(/\r?\n/)
+                      .map((v) => v.trim())
+                      .filter(Boolean),
+                    tests: field(d, "protectedPaths")
+                      .split(/\r?\n/)
+                      .map((v) => v.trim())
+                      .filter(Boolean),
+                    rounds: number(d, "rounds"),
+                  },
+                }
               : {}),
             priority: tier ? priority(tier) : null,
             route,
@@ -288,7 +312,7 @@ export function QueueStepForm({
                 )
               }
             >
-              <option value="check">
+              <option value="check" disabled={protectionRequired}>
                 <T>Deterministic check</T>
               </option>
               <option value="economy">
@@ -311,6 +335,56 @@ export function QueueStepForm({
                   <T>Assign to Reviewer automatically when eligible</T>
                 </label>
               )}
+              {reviewSupported && guardedSupported && (
+                <>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={guard}
+                      disabled={protectionRequired}
+                      onChange={(e) => setGuard(e.target.checked)}
+                    />
+                    <T>Protected Builder → Reviewer loop</T>
+                  </label>
+                  {guard && (
+                    <>
+                      <small>
+                        <T>
+                          Each turn uses a fresh, tool-free Claude agent. Choose existing source and
+                          test files. Every other path is read-only.
+                        </T>
+                      </small>
+                      <label>
+                        <T>Writable source paths, one per line</T>
+                        <textarea
+                          required
+                          name="sourcePaths"
+                          defaultValue={step?.guarded?.source.join("\n")}
+                        />
+                      </label>
+                      <label>
+                        <T>Protected test paths to include as context, one per line</T>
+                        <textarea
+                          required
+                          name="protectedPaths"
+                          defaultValue={step?.guarded?.tests.join("\n")}
+                        />
+                      </label>
+                      <label>
+                        <T>Maximum build and review rounds</T>
+                        <input
+                          name="rounds"
+                          type="number"
+                          min={1}
+                          max={3}
+                          defaultValue={step?.guarded?.rounds ?? 2}
+                          required
+                        />
+                      </label>
+                    </>
+                  )}
+                </>
+              )}
               <Amount
                 name="input"
                 label={gt("Estimated input tokens")}
@@ -323,10 +397,10 @@ export function QueueStepForm({
               />
               <Amount
                 name="cost"
-                label={gt("Estimated USD")}
+                label={guard ? gt("Per-turn USD limit") : gt("Estimated USD")}
                 value={step?.estimatedUsd ?? null}
                 fraction
-                optional
+                optional={!guard}
               />
               <Amount
                 name="window"

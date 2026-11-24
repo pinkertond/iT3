@@ -1,3 +1,4 @@
+import { ProjectIntents } from "./ProjectIntents";
 import { ActivityStatus } from "../shared/ActivityStatus";
 import { resolveRuntimeModeOption } from "~/components/chat/runtimeModeConfig";
 import { BranchUsage } from "./ProjectUsage";
@@ -124,7 +125,7 @@ function Roster({ selected: t }: { selected: EnvironmentThreadShell }) {
         <>
           <nav className={styles["team-links"]}>
             <Link to="/workspaces" search={{ ...home, view: "agents" }}>
-              <T>Project</T>
+              <T>Project home</T>
             </Link>
             <Link to="/workspaces" search={{ ...home, view: "tasks", agent: t.id }}>
               <T>Tasks</T>
@@ -136,6 +137,17 @@ function Roster({ selected: t }: { selected: EnvironmentThreadShell }) {
               <T>Usage</T>
             </Link>
           </nav>
+          {project &&
+            configs.get(t.environmentId)?.settings.it3Workspaces?.projects?.[t.projectId]
+              ?.managerThreadId === t.id && (
+              <ProjectIntents
+                project={project}
+                tasks={!!configs.get(t.environmentId)?.environment.capabilities.it3Tasks}
+                workflows={
+                  !!configs.get(t.environmentId)?.environment.capabilities.it3WorkflowCanvas
+                }
+              />
+            )}
           <h2>{t.title}</h2>
           <p>
             <ActivityStatus

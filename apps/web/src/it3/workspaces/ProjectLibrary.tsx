@@ -87,18 +87,20 @@ export function TaskReference({ project, reference }: { project: Project; refere
   );
 }
 export function ProjectLibrary({
+  initialSection,
   project,
   node,
   onNode,
 }: {
   project: Project;
+  initialSection?: string | undefined;
   node: string | undefined;
   onNode: (n: string | undefined) => void;
 }) {
   const gt = useGT();
   const index = useSource(project, ".it3/home/index.json");
   const doc = decode(manifest, index.data?.contents);
-  const [section, setSection] = useState("Documentation");
+  const [section, setSection] = useState(initialSection ?? "Documentation");
   const selected = node && /^[a-f0-9]{64}$/.test(node) ? node : null;
   const root = doc ? ".it3/home/" + doc.digest + "/" : "";
   return (
@@ -150,6 +152,7 @@ export function ProjectLibrary({
                     .join(" · ")}
                 </p>
               )}
+              {!doc.sections[section] && <LiveLibrary project={project} initialSection={section} />}
               {doc.sections[section] && (
                 <Listing
                   key={root + section}
@@ -173,7 +176,7 @@ export function ProjectLibrary({
               <T>Unsupported project index. Showing live project files.</T>
             </p>
           )}
-          <LiveLibrary project={project} />
+          <LiveLibrary project={project} initialSection={initialSection} />
           <details>
             <summary>
               <T>Generate the project site</T>
@@ -192,15 +195,24 @@ export function ProjectLibrary({
   );
 }
 const liveKinds: Record<string, string> = {
+  Connections: "connection|protocol|network|request|host",
+  Data: "database|schema|erd|table",
+  Delivery: "build|pipeline|audit",
   Tasks: "task",
   Laws: "law|principle|invariant",
   Deployments: "deployment",
   Versions: "version|release",
   Agents: "agent|seat|team",
 };
-function LiveLibrary({ project }: { project: Project }) {
+function LiveLibrary({
+  project,
+  initialSection,
+}: {
+  project: Project;
+  initialSection?: string | undefined;
+}) {
   const gt = useGT();
-  const [section, setSection] = useState("Documentation");
+  const [section, setSection] = useState(initialSection ?? "Documentation");
   const scan = useProjectContentSearch({
     environmentId: project.environmentId,
     cwd: project.workspaceRoot,

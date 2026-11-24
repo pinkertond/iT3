@@ -147,17 +147,23 @@ function outputDirectory(dir) {
 const outputs = new Map();
 const pageSize = 12;
 const section = (k) =>
-  k === "task"
-    ? "Tasks"
-    : ["law", "principle", "invariant"].includes(k)
-      ? "Laws"
-      : k === "deployment"
-        ? "Deployments"
-        : ["version", "release"].includes(k)
-          ? "Versions"
-          : ["agent", "seat", "team"].includes(k)
-            ? "Agents"
-            : "Documentation";
+  ["connection", "protocol", "network", "request", "host"].includes(k)
+    ? "Connections"
+    : ["database", "schema", "erd", "table"].includes(k)
+      ? "Data"
+      : ["build", "pipeline", "audit"].includes(k)
+        ? "Delivery"
+        : k === "task"
+          ? "Tasks"
+          : ["law", "principle", "invariant"].includes(k)
+            ? "Laws"
+            : k === "deployment"
+              ? "Deployments"
+              : ["version", "release"].includes(k)
+                ? "Versions"
+                : ["agent", "seat", "team"].includes(k)
+                  ? "Agents"
+                  : "Documentation";
 const pageKey = (k, n) => sha(k + "\n" + n).slice(0, 24);
 function indexPage(key, array) {
   const total = array.length;
@@ -192,7 +198,17 @@ for (const n of nodes) {
 }
 const row = (n) => ({ id: n.id, title: n.title, kind: n.kind, status: n.status, key: sha(n.id) });
 const sections = {};
-for (const name of ["Documentation", "Tasks", "Laws", "Deployments", "Versions", "Agents"]) {
+for (const name of [
+  "Documentation",
+  "Tasks",
+  "Laws",
+  "Deployments",
+  "Versions",
+  "Agents",
+  "Connections",
+  "Data",
+  "Delivery",
+]) {
   const items = nodes.filter(
     (n) =>
       section(n.kind) === name &&

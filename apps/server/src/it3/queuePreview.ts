@@ -56,6 +56,7 @@ export const reviewPool = (p: ServerProvider) =>
   ]);
 
 export interface PreviewInput {
+  guardedSpend?: ReadonlyMap<ProjectId, { tokens: number; usd: number; estimated: boolean }>;
   projects: readonly OrchestrationProjectShell[];
   settings: ServerSettings;
   attempts: readonly QueueAttempt[];
@@ -267,11 +268,18 @@ export function previewQueue(input: PreviewInput, limit = 12) {
         evidence,
       );
     const spent = settled.get(project.id)!;
-    const remainingTokens = policy.dailyTokens - spent.tokens - total;
+    const remainingTokens =
+      policy.dailyTokens -
+      spent.tokens -
+      (input.guardedSpend?.get(project.id)?.tokens ?? 0) -
+      total;
     const remainingUsd =
       policy.dailyUsd === null || spent.unpriced > 0
         ? null
-        : policy.dailyUsd - spent.usd - (step.estimatedUsd ?? 0);
+        : policy.dailyUsd -
+          spent.usd -
+          (input.guardedSpend?.get(project.id)?.usd ?? 0) -
+          (step.estimatedUsd ?? 0);
     const projection = { ...evidence, remainingTokens, remainingUsd };
     if (remainingTokens < 0)
       return decide(
@@ -330,7 +338,18 @@ export function previewQueue(input: PreviewInput, limit = 12) {
       a.row.projectId.localeCompare(b.row.projectId) ||
       a.row.attempt - b.row.attempt,
   );
+  const attention = attempts
+    .flatMap((a) =>
+      a.attention ? [{ projectId: a.projectId, key: a.key, title: a.title, ...a.attention }] : [],
+    )
+    .sort((a, b) => a.since.localeCompare(b.since) || a.key.localeCompare(b.key));
   return {
+    guardedSpend: Array.from(input.guardedSpend ?? [], ([projectId, values]) => ({
+      projectId,
+      ...values,
+    })),
+    attention: attention.slice(input.offset, input.offset + limit),
+    attentionTotal: attention.length,
     asOf,
     day,
     eligible: decisions.filter((d) => d.row.reason === "ready").length,

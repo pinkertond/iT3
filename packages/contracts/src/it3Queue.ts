@@ -19,6 +19,19 @@ export const QueuePolicy = Schema.Struct({
 export type QueuePolicy = typeof QueuePolicy.Type;
 
 export const QueueStep = Schema.Struct({
+  guarded: Schema.optionalKey(
+    Schema.Struct({
+      source: Schema.Array(TrimmedNonEmptyString).check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(12),
+      ),
+      tests: Schema.Array(TrimmedNonEmptyString).check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(12),
+      ),
+      rounds: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3 })),
+    }),
+  ),
   seat: Schema.optionalKey(Schema.Literal("reviewer")),
   priority: Schema.NullOr(Priority),
   route: Schema.Literals(["check", "economy", "advanced"]),
@@ -79,6 +92,28 @@ const Decision = Schema.Struct({
 });
 export type QueueDecision = typeof Decision.Type;
 export const QueuePreview = Schema.Struct({
+  guardedSpend: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        projectId: ProjectId,
+        tokens: NonNegativeInt,
+        usd: Money,
+        estimated: Schema.Boolean,
+      }),
+    ),
+  ),
+  attention: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        projectId: ProjectId,
+        key: Schema.String,
+        title: Schema.String,
+        detail: Schema.String,
+        since: Schema.String,
+      }),
+    ),
+  ),
+  attentionTotal: Schema.optionalKey(NonNegativeInt),
   asOf: Schema.String,
   day: Schema.String,
   eligible: NonNegativeInt,

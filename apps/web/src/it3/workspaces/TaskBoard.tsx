@@ -1,3 +1,4 @@
+import { projectDraft } from "./ProjectIntents";
 import { ActivityStatus } from "../shared/ActivityStatus";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
@@ -27,6 +28,9 @@ import { PageList } from "./PageList";
 import styles from "./workspaces.module.css";
 
 type Props = {
+  concept?: string | undefined;
+  intent?: string | undefined;
+  guardedSupported?: boolean;
   reviewSupported?: boolean;
   queueSupported?: boolean;
   thread?: string | undefined;
@@ -38,6 +42,9 @@ type Props = {
   onSelect: (key?: string) => void;
 };
 export function TaskBoard({
+  guardedSupported,
+  intent,
+  concept,
   reviewSupported,
   queueSupported,
   project,
@@ -49,15 +56,19 @@ export function TaskBoard({
   onSelect,
 }: Props) {
   const gt = useGT();
+  const draft = projectDraft(intent);
   const recordKey = selected ?? seed;
   const [offset, setOffset] = useState(0);
-  const [creating, setCreating] = useState(!!seed);
+  const [creating, setCreating] = useState(!!seed || !!draft);
   const [key, setKey] = useState(seed ?? "");
   const [title, setTitle] = useState("");
   const [request, setRequest] = useState("");
   const [ref, setRef] = useState(source ?? "");
-  const [steps, setSteps] = useState("");
-  const [compare, setCompare] = useState(false);
+  const [steps, setSteps] = useState(draft?.steps ?? "");
+  const implementationIntent = intent === "fix" || intent === "implement" || intent === "interface";
+  const [protect, setProtect] = useState(!!guardedSupported && !draft && !seed);
+  const protectedTask = implementationIntent || protect;
+  const [compare, setCompare] = useState(draft?.compare ?? false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const query = useEnvironmentQuery(
@@ -153,6 +164,8 @@ export function TaskBoard({
               requestId: randomUUID(),
               change: {
                 action: "create",
+                ...(concept && protectedTask ? { basedOn: concept } : {}),
+                ...(protectedTask ? { protectedImplementation: true as const } : {}),
                 title: title.trim(),
                 request: request.trim(),
                 reference: ref.trim(),
@@ -166,6 +179,11 @@ export function TaskBoard({
             });
           }}
         >
+          {concept && (
+            <p>
+              <T>Selected design task</T> · {concept}
+            </p>
+          )}
           <label>
             <T>Task ID</T>
             <input
@@ -206,13 +224,39 @@ export function TaskBoard({
             <span>
               <input
                 type="checkbox"
+                disabled={protectedTask}
                 checked={compare}
                 onChange={(e) => setCompare(e.target.checked)}
               />{" "}
               <T>Compare two attempts in separate worktrees</T>
             </span>
           </label>
-          <button disabled={busy || !canWrite}>
+          {!draft && guardedSupported && (
+            <label>
+              <input
+                type="checkbox"
+                checked={protect}
+                onChange={(e) => {
+                  setProtect(e.target.checked);
+                  if (e.target.checked) setCompare(false);
+                }}
+              />
+              <T>Protect implementation and tests</T>
+            </label>
+          )}
+          {implementationIntent && !guardedSupported && (
+            <p role="alert">
+              <T>Update this host to start protected implementation work.</T>
+            </p>
+          )}
+          {protectedTask && (
+            <small>
+              <T>
+                This implementation task requires a protected loop and independent verification.
+              </T>
+            </small>
+          )}
+          <button disabled={busy || !canWrite || (protectedTask && !guardedSupported)}>
             <T>Create task</T>
           </button>
         </form>
@@ -258,10 +302,41 @@ export function TaskBoard({
                 ? gt("Comparing two attempts")
                 : gt("Single attempt")}
           </p>
+          {current.basedOn && (
+            <Link
+              to="/workspaces"
+              search={{
+                env: project.environmentId,
+                project: project.id,
+                view: "tasks",
+                task: current.basedOn,
+              }}
+            >
+              <T>Open selected design</T> · {current.basedOn}
+            </Link>
+          )}
+          {current.accepted && current.comparison && guardedSupported && (
+            <Link
+              className={styles["iw-row"]}
+              to="/workspaces"
+              search={{
+                env: project.environmentId,
+                project: project.id,
+                view: "tasks",
+                intent: "implement",
+                concept: current.key,
+              }}
+            >
+              <T>Implement the selected concept</T> →
+            </Link>
+          )}
           {queueSupported &&
             current.attempts[0] &&
+            !current.attempts[0].guarded &&
             current.attempts.every((a) => a.stage === "ready") && (
               <QueueStepForm
+                protectionRequired={!!current.protectedImplementation}
+                guardedSupported={guardedSupported}
                 reviewSupported={
                   reviewSupported && !current.comparison && !current.attempts[0]?.review
                 }
@@ -442,6 +517,62 @@ function Attempt({
           )}
         </section>
       )}
+      {a.guarded && (
+        <section>
+          <h4>
+            <T>Protected candidate</T>
+          </h4>
+          <p>
+            {a.guarded.role} · {gt("Round")} {a.guarded.round} / {task.queueStep?.guarded?.rounds}
+          </p>
+          <p>
+            <code>
+              git diff {a.guarded.base} {a.guarded.candidate}
+            </code>
+          </p>
+          {a.guarded.contest && (
+            <p>
+              <strong>
+                <T>Test contest</T>
+              </strong>{" "}
+              · {a.guarded.testPath} · {a.guarded.contest}
+            </p>
+          )}
+          <details>
+            <summary>
+              <T>Turn receipts</T> · {a.guarded.history.length}
+            </summary>
+            {a.guarded.history.map((r) => (
+              <p key={r.id}>
+                {r.detail} · {r.tokens ?? gt("Unknown")} <T>tokens</T> ·{" "}
+                {r.pricedUsd === null ? gt("Cost unavailable") : "$" + r.pricedUsd.toFixed(6)} ·{" "}
+                <code>{r.run}</code>
+              </p>
+            ))}
+          </details>
+          {a.guarded.approved && !task.accepted && (
+            <form
+              className={styles["task-form"]}
+              onSubmit={(e) => {
+                e.preventDefault();
+                void change({
+                  action: "verifyCandidate",
+                  commit: a.guarded!.candidate,
+                  evidence: String(new FormData(e.currentTarget).get("evidence")).trim(),
+                });
+              }}
+            >
+              <label>
+                <T>Independent check result or CI evidence for this commit</T>
+                <textarea required minLength={1} maxLength={4000} name="evidence" />
+              </label>
+              <button disabled={disabled}>
+                <T>Accept verified candidate</T>
+              </button>
+            </form>
+          )}
+        </section>
+      )}
       <dl>
         <dt>
           <T>Last checkpoint</T>
@@ -514,7 +645,7 @@ function Attempt({
           )}
         </section>
       )}
-      {a.stage === "working" && (
+      {!task.queueStep?.guarded && a.stage === "working" && (
         <button disabled={disabled} onClick={() => void change({ action: "inspect" })}>
           <T>Inspect interrupted work</T>
         </button>
@@ -586,46 +717,49 @@ function Attempt({
           · {a.verification}
         </p>
       )}
-      {!task.accepted && a.stage !== "submitted" && (
-        <details>
-          <summary>
-            <T>Assign or hand off</T>
-          </summary>
-          <form
-            className={styles["task-form"]}
-            onSubmit={(e) => {
-              e.preventDefault();
-              void change({ action: "handoff", target: target as ThreadId, next: next.trim() });
-            }}
-          >
-            <label>
-              <T>Receiving chat</T>
-              <select required value={target} onChange={(e) => setTarget(e.target.value)}>
-                <option value="">{gt("Choose a conversation")}</option>
-                {threads
-                  .filter((t) => !t.deletedAt && !t.archivedAt && t.id !== a.owner)
-                  .map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.title}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label>
-              <T>Next action for the recipient</T>
-              <textarea
-                required
-                maxLength={4000}
-                value={next}
-                onChange={(e) => setNext(e.target.value)}
-              />
-            </label>
-            <button disabled={disabled}>
-              <T>Assign and notify</T>
-            </button>
-          </form>
-        </details>
-      )}
+      {!task.protectedImplementation &&
+        !task.queueStep?.guarded &&
+        !task.accepted &&
+        a.stage !== "submitted" && (
+          <details>
+            <summary>
+              <T>Assign or hand off</T>
+            </summary>
+            <form
+              className={styles["task-form"]}
+              onSubmit={(e) => {
+                e.preventDefault();
+                void change({ action: "handoff", target: target as ThreadId, next: next.trim() });
+              }}
+            >
+              <label>
+                <T>Receiving chat</T>
+                <select required value={target} onChange={(e) => setTarget(e.target.value)}>
+                  <option value="">{gt("Choose a conversation")}</option>
+                  {threads
+                    .filter((t) => !t.deletedAt && !t.archivedAt && t.id !== a.owner)
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                <T>Next action for the recipient</T>
+                <textarea
+                  required
+                  maxLength={4000}
+                  value={next}
+                  onChange={(e) => setNext(e.target.value)}
+                />
+              </label>
+              <button disabled={disabled}>
+                <T>Assign and notify</T>
+              </button>
+            </form>
+          </details>
+        )}
       {a.stage === "assigned" && a.delivery === "saved" && (
         <button disabled={disabled} onClick={() => void change({ action: "notify" })}>
           <T>Retry delivery</T>

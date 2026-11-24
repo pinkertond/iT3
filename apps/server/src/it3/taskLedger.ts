@@ -204,6 +204,7 @@ function reduce(
   if (c.action === "create") {
     if (
       actor.kind !== "operator" ||
+      (c.protectedImplementation && c.comparison) ||
       current ||
       edit.attempt !== 1 ||
       edit.generation ||
@@ -211,6 +212,8 @@ function reduce(
     )
       refuse("Task already exists or this creation is invalid.");
     return {
+      ...(c.basedOn ? { basedOn: c.basedOn } : {}),
+      ...(c.protectedImplementation ? { protectedImplementation: true as const } : {}),
       key: edit.key,
       title: c.title,
       request: c.request,
@@ -235,10 +238,44 @@ function reduce(
     refuse(
       "The reviewer owns this attempt until its native run ends. Open the reviewer chat to answer or stop it.",
     );
+  if (
+    task.protectedImplementation &&
+    c.action !== "verifyCandidate" &&
+    (c.action !== "plan" || (c.step && !c.step.guarded))
+  )
+    refuse("Implementation tasks require the protected Builder → Reviewer loop.");
+  if (
+    (old.guarded || (task.queueStep?.guarded && c.action !== "plan")) &&
+    c.action !== "verifyCandidate"
+  )
+    refuse("This protected task is owned by the guarded loop.");
   let a = { ...old, revision: old.revision + 1, updated: at };
   let accepted: number | null = null;
   switch (c.action) {
+    case "verifyCandidate": {
+      if (
+        actor.kind !== "operator" ||
+        !old.guarded?.stopped ||
+        !old.guarded.approved ||
+        old.guarded.candidate !== c.commit
+      )
+        refuse("Verify the exact independently reviewed candidate.");
+      accepted = old.number;
+      a = {
+        ...a,
+        stage: "submitted",
+        verification: c.evidence,
+        next: "",
+        steps: a.steps.map((step) => ({ ...step, done: true })),
+      };
+      break;
+    }
     case "plan": {
+      if (c.step?.guarded) {
+        if (c.step.seat !== "reviewer" || !c.step.estimatedUsd)
+          refuse("A protected loop requires a paid seat and a positive per-turn USD limit.");
+        validateFiles([...c.step.guarded.source, ...c.step.guarded.tests]);
+      }
       if (c.step?.seat && (c.step.route === "check" || task.comparison || old.review))
         refuse("Choose a model route and a single attempt for automatic review.");
 
@@ -400,6 +437,11 @@ export function writeTask(
         if (seen.input !== input || !current) refuse("Request ID already used for another change.");
         return current;
       }
+      if (edit.change.action === "create" && edit.change.basedOn) {
+        const source = lookup(db, project, edit.change.basedOn);
+        if (!source?.accepted || !edit.change.protectedImplementation)
+          refuse("Choose an accepted result in this project for a protected implementation task.");
+      }
       const at = new Date().toISOString(),
         result = reduce(current, edit, actor, at, evidence);
       const c = edit.change;
@@ -418,7 +460,9 @@ export function writeTask(
                     ? "Accepted result"
                     : c.action === "notify"
                       ? "Queued in the receiving chat"
-                      : c.checkpoint;
+                      : c.action === "verifyCandidate"
+                        ? c.commit + " · " + c.evidence
+                        : c.checkpoint;
       const detail =
         c.action === "checkpoint"
           ? [
@@ -463,6 +507,7 @@ export function writeTask(
 }
 
 export interface QueueAttempt {
+  attention?: { detail: string; since: string };
   reviewStatus?: string;
   projectId: ProjectId;
   key: string;
@@ -483,6 +528,9 @@ export function readQueueAttempts(directory: string) {
       const rows = db
         .prepare(`SELECT t.project,t.key,json_extract(t.body,'$.title') title,
         COALESCE(NULLIF(a.value ->> '$.reviewHold',''),a.value ->> '$.review.detail') review_state,
+        CASE WHEN length(a.value ->> '$.reviewHold')>0 THEN a.value ->> '$.reviewHold'
+          WHEN a.value ->> '$.review.finished' IS NOT NULL AND a.value ->> '$.stage'='ready' THEN COALESCE(NULLIF(a.value ->> '$.checkpoint',''),a.value ->> '$.review.detail') END attention,
+        a.value ->> '$.updated' updated,
         json_extract(t.body,'$.queueStep') step,a.value ->> '$.number' attempt,a.value ->> '$.stage' stage,
         MAX(e.at, COALESCE((SELECT MAX(plan.at) FROM events plan WHERE plan.project=t.project AND plan.key=t.key AND plan.action='plan'),e.at),
           COALESCE((SELECT MAX(done.at) FROM json_each(t.body,'$.queueStep.dependencies') d
@@ -500,11 +548,42 @@ export function readQueueAttempts(directory: string) {
         title: String(r.title),
         attempt: Number(r.attempt),
         ...(r.review_state ? { reviewStatus: String(r.review_state) } : {}),
+        ...(r.attention
+          ? { attention: { detail: String(r.attention), since: String(r.updated) } }
+          : {}),
         readySince: String(r.ready_since),
         stage: String(r.stage),
         step: r.step ? decodeQueueStep(String(r.step)) : null,
         blockedBy: r.blocked === null ? null : String(r.blocked),
       }));
+    } finally {
+      db.close();
+    }
+  });
+}
+
+export function readGuardedSpend(directory: string, day: string) {
+  return taskLedgerOperation(() => {
+    const spend = new Map<ProjectId, { tokens: number; usd: number; estimated: boolean }>();
+    if (!NodeFS.existsSync(NodePath.join(directory, "it3-tasks.sqlite"))) return spend;
+    const db = openTaskLedger(directory, true);
+    try {
+      if (db.prepare("PRAGMA user_version").get()?.user_version === 0) return spend;
+      const rows = db
+        .prepare(`SELECT project,
+          SUM(COALESCE(h.value->>'$.tokens',h.value->>'$.reservedTokens')) tokens,
+          SUM(COALESCE(h.value->>'$.pricedUsd',h.value->>'$.reservedUsd')) usd,
+          MAX(h.value->>'$.tokens' IS NULL OR h.value->>'$.pricedUsd' IS NULL) estimated
+          FROM tasks,json_each(body,'$.attempts[0].guarded.history') h
+          WHERE h.value->>'$.day'=? GROUP BY project`)
+        .all(day);
+      for (const r of rows)
+        spend.set(ProjectId.make(String(r.project)), {
+          tokens: Number(r.tokens),
+          usd: Number(r.usd),
+          estimated: !!r.estimated,
+        });
+      return spend;
     } finally {
       db.close();
     }

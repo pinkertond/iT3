@@ -23,7 +23,7 @@ export const reviewJobs = (dir: string, now: string) =>
         .prepare(`SELECT project,body FROM tasks WHERE (json_extract(body,'$.attempts[0].review.nextAccounting')<=?) OR json_extract(body,'$.queueStep.seat')='reviewer'
       AND (json_extract(body,'$.attempts[0].review.phase') IN ('reserved','running') OR
         (json_extract(body,'$.accepted') IS NULL AND json_extract(body,'$.attempts[0].stage')='ready'
-        AND json_extract(body,'$.attempts[0].review') IS NULL))`)
+        AND COALESCE(json_extract(body,'$.attempts[0].guarded.stopped'),0)=0 AND json_extract(body,'$.attempts[0].review') IS NULL))`)
         .all(now);
       return {
         watermark,
@@ -37,6 +37,7 @@ export const reviewJobs = (dir: string, now: string) =>
     }
   });
 type ReservationCheck = {
+  observedGuarded?: { tokens: number; usd: number } | undefined;
   watermark: number;
   checkedAt: string;
   usageAt: string;
@@ -82,8 +83,9 @@ export function updateReview(
         )
           return false;
         const busy = db
-          .prepare(`SELECT 1 FROM tasks t, json_each(t.body,'$.attempts') a WHERE a.value ->> '$.review' IS NOT NULL AND
-          ((t.project=? AND (a.value ->> '$.review.finished' IS NULL OR a.value ->> '$.review.finished'>=?))
+          .prepare(`SELECT 1 FROM (SELECT t.project, a.value FROM tasks t, json_each(t.body,'$.attempts') a
+          UNION ALL SELECT t.project, json_object('review', json(h.value)) FROM tasks t, json_each(t.body,'$.attempts[0].guarded.history') h) a WHERE a.value ->> '$.review' IS NOT NULL AND
+          ((a.project=? AND (a.value ->> '$.review.finished' IS NULL OR a.value ->> '$.review.finished'>=?))
           OR ((a.value ->> '$.review.pool'=? OR (a.value ->> '$.review.driver'=? AND (a.value ->> '$.review.identified'=0 OR ?=0))) AND (a.value ->> '$.review.finished' IS NULL OR a.value ->> '$.review.finished'>=?))) LIMIT 1`)
           .get(
             job.project,
@@ -102,10 +104,27 @@ export function updateReview(
           .prepare(`SELECT MAX((a.value ->> '$.review.spentBeforeTokens')+
            COALESCE(a.value ->> '$.review.tokens',a.value ->> '$.review.reservedTokens')) tokens,
            MAX(COALESCE(a.value ->> '$.review.spentBeforeUsd',0)+COALESCE(a.value ->> '$.review.pricedUsd',a.value ->> '$.review.reservedUsd',0)) usd
-           FROM tasks t, json_each(t.body,'$.attempts') a WHERE t.project=? AND a.value ->> '$.review.day'=? AND a.value ->> '$.review.finished' IS NOT NULL`)
+           FROM (SELECT t.project, a.value FROM tasks t, json_each(t.body,'$.attempts') a
+           UNION ALL SELECT t.project, json_object('review', json(h.value)) FROM tasks t, json_each(t.body,'$.attempts[0].guarded.history') h) a
+           WHERE a.project=? AND a.value ->> '$.review.day'=? AND a.value ->> '$.review.finished' IS NOT NULL`)
           .get(job.project, r.day);
-        const tokens = Math.max(r.spentBeforeTokens, Number(charged?.tokens ?? 0));
-        const usd = Math.max(r.spentBeforeUsd ?? 0, Number(charged?.usd ?? 0));
+        // Tool-free turns have no native session log. Count them in addition to freshly
+        // scanned ordinary-chat usage. The SQL reservation also protects older readers.
+        const guard = db
+          .prepare(`SELECT SUM(COALESCE(h.value->>'$.tokens',h.value->>'$.reservedTokens')) tokens,
+          SUM(COALESCE(h.value->>'$.pricedUsd',h.value->>'$.reservedUsd')) usd
+          FROM tasks,json_each(body,'$.attempts[0].guarded.history') h WHERE project=? AND h.value->>'$.day'=?`)
+          .get(job.project, r.day);
+        const tokens = Math.max(
+          r.spentBeforeTokens +
+            Number(guard?.tokens ?? 0) -
+            (admission.observedGuarded?.tokens ?? 0),
+          Number(charged?.tokens ?? 0),
+        );
+        const usd = Math.max(
+          (r.spentBeforeUsd ?? 0) + Number(guard?.usd ?? 0) - (admission.observedGuarded?.usd ?? 0),
+          Number(charged?.usd ?? 0),
+        );
         if (tokens + r.reservedTokens > admission.tokenLimit)
           return "Settled reviewer usage leaves insufficient daily tokens.";
         if (admission.costLimit !== null && usd + (r.reservedUsd ?? 0) > admission.costLimit)
@@ -113,6 +132,8 @@ export function updateReview(
         patch = { ...patch, review: { ...r, spentBeforeTokens: tokens, spentBeforeUsd: usd } };
       }
       const attempt = { ...old, ...patch, revision: old.revision + 1, updated: at };
+      if (patch.guarded && patch.guarded.history.length > (old.guarded?.history.length ?? 0))
+        delete attempt.review;
       if (releaseUnsent) {
         if (old.review?.phase !== "reserved" || old.review.run) return false;
         delete attempt.review;

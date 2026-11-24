@@ -70,3 +70,9 @@ The fork advertises the optional `it3WorkflowSubflows` environment capability. R
 ### Automatic reviewer dispatch
 
 The fork owns the reviewer scheduler, SQLite mutations and queue reader in the server's `it3/` directory. The startup mount in `server.ts` ties its lifetime to the host. `ThreadManagementService` forwards an optional review precondition to the native `message.dispatch` handler. Check that precondition, native command receipt replay, fresh-context structured results and per-run provider-turn attribution when updating upstream. `UsageService` exposes its existing model pricing to the dispatcher. Project settings bind the seat and the optional environment capability gates its controls. The dispatcher test exercises overlapping admissions, recovery of a lost send response and settlement against native run IDs. Retire these seams as equivalent upstream services become available.
+
+## Protected tasks and project entry points
+
+The host owns candidate creation, role transitions and settlement in `apps/server/src/it3/`. The optional `it3GuardedLoop` capability enables the UI only on compatible hosts. The only change to the shared thread projection is the pending-request timestamp used by the workspace inbox. Preserve the `intent` and `section` search parameters on the workspace route when rebasing. Verify the candidate and dispatch suites, the project-intent browser suite, and the project-home generator after an upstream merge.
+
+The first restricted adapter uses the host's default Claude CLI, a matching signed-in account and fresh tool-free sessions. Supporting another harness requires an equivalent write boundary, independent session identities, usage evidence and a working negative test for protected paths.

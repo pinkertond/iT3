@@ -1,4 +1,6 @@
 import { QueuePreview } from "./QueuePreview";
+import { NeedsYou } from "./NeedsYou";
+import { ProjectIntents } from "./ProjectIntents";
 import { TaskBoard } from "./TaskBoard";
 import styles from "./workspaces.module.css";
 import { T, useGT } from "gt-react";
@@ -40,6 +42,9 @@ import { PageList } from "./PageList";
 
 const route = "/workspaces";
 type SearchState = {
+  intent?: string;
+  concept?: string;
+  section?: string;
   assign?: string;
   view?: string;
   task?: string;
@@ -302,6 +307,7 @@ export function WorkspacesPage() {
                   </span>
                 </label>
               </div>
+              {!active && <NeedsYou projects={projects} />}
               <h2>
                 <T>Projects</T> <small>{visible.length}</small>
               </h2>
@@ -401,6 +407,8 @@ function ProjectHome({
     : tree.roots.length === 1
       ? tree.roots[0]
       : undefined;
+  const guardedSupported =
+    useServerConfigs().get(p.environmentId)?.environment.capabilities.it3GuardedLoop === true;
   const canvasSupported =
     useServerConfigs().get(p.environmentId)?.environment.capabilities.it3WorkflowCanvas === true;
   const reviewSupported =
@@ -482,6 +490,9 @@ function ProjectHome({
       <p className={styles["iw-secondary"]}>
         {machine} · {p.workspaceRoot}
       </p>
+      {view === "agents" && (
+        <ProjectIntents project={p} tasks={taskSupported} workflows={canvasSupported} />
+      )}
       <div className={styles["iw-filters"]}>
         <label>
           <T>Workspace</T>
@@ -557,9 +568,12 @@ function ProjectHome({
       {view === "tasks" ? (
         taskSupported ? (
           <TaskBoard
-            key={JSON.stringify([query.task, query.assign])}
+            key={JSON.stringify([query.task, query.assign, query.intent, query.concept])}
+            intent={query.intent}
+            concept={query.concept}
             project={p}
             threads={threads}
+            guardedSupported={guardedSupported}
             reviewSupported={reviewSupported}
             queueSupported={queueSupported}
             selected={query.task}
@@ -568,6 +582,8 @@ function ProjectHome({
             source={query.source}
             onSelect={(id) => {
               const q = { ...query, view: "tasks" };
+              delete q.intent;
+              delete q.concept;
               delete q.assign;
               delete q.source;
               if (id) q.task = id;
@@ -587,7 +603,13 @@ function ProjectHome({
           policy={config?.queuePolicy ?? null}
         />
       ) : view === "docs" ? (
-        <ProjectLibrary project={p} node={node} onNode={onNode} />
+        <ProjectLibrary
+          key={query.section}
+          initialSection={query.section}
+          project={p}
+          node={node}
+          onNode={onNode}
+        />
       ) : view === "usage" ? (
         <ProjectUsage
           env={p.environmentId}
