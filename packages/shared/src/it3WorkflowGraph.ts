@@ -1,6 +1,13 @@
 import * as Schema from "effect/Schema";
 
-const Kind = Schema.Literals(["start", "check", "branch", "review", "result", "set"]);
+import { workflowComponents } from "./it3WorkflowRegistry.ts";
+export { workflowComponents };
+export { componentAccess } from "./it3WorkflowRegistry.ts";
+const kinds = Object.keys(workflowComponents) as [
+  keyof typeof workflowComponents,
+  ...(keyof typeof workflowComponents)[],
+];
+const Kind = Schema.Literals(kinds);
 export type CanvasKind = typeof Kind.Type;
 const Predicate = Schema.Literals(["failed", "skipped"]);
 const identifier = Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9-]{0,79}$/));
@@ -11,6 +18,12 @@ const GraphNode = Schema.Struct({
   label,
   predicate: Schema.optionalKey(Predicate),
   output: Schema.optionalKey(Schema.Literals(["summary", "brief"])),
+  target: Schema.optionalKey(
+    Schema.Struct({
+      workflow: identifier,
+      version: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
+    }),
+  ),
   copiedFrom: Schema.optionalKey(
     Schema.Struct({
       workflow: identifier,
@@ -33,7 +46,10 @@ export type CanvasGraph = typeof Graph.Type;
 const Positions = Schema.Record(identifier, Schema.Struct({ x: Schema.Finite, y: Schema.Finite }));
 export type CanvasLayout = typeof Positions.Type;
 const Document = Schema.Struct({
-  format: Schema.Literals([1, 2]),
+  format: Schema.Literals([1, 2, 3]),
+  legacyVersions: Schema.optionalKey(
+    Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+  ),
   name: identifier,
   projectId: Schema.NullOr(label),
   revisions: Schema.Array(Graph).check(Schema.isMinLength(1)),
@@ -41,8 +57,7 @@ const Document = Schema.Struct({
 });
 export type CanvasDocument = typeof Document.Type;
 const decode = Schema.decodeUnknownSync(Document);
-export const portsFor = (kind: CanvasKind): readonly CanvasPort[] =>
-  kind === "result" ? [] : kind === "review" || kind === "branch" ? ["yes", "no"] : ["next"];
+export const portsFor = (kind: CanvasKind): readonly CanvasPort[] => workflowComponents[kind].ports;
 export function graphProblem(graph: CanvasGraph): string | null {
   if (graph.nodes.length > 12) return "A graph can have up to 12 nodes.";
   const nodes = new Map(graph.nodes.map((n) => [n.id, n]));
@@ -92,15 +107,25 @@ export function blankWorkflow(name: string, projectId: string | null): CanvasDoc
   };
 }
 
-export function configurationProblem(graph: CanvasGraph, format: 1 | 2): string | null {
+export function configurationProblem(graph: CanvasGraph, format: 1 | 2 | 3): string | null {
   for (const n of graph.nodes) {
+    if (format !== 3 && !["start", "set", "review", "check", "branch", "result"].includes(n.kind))
+      return "This component needs workflow format 3.";
+    if (
+      workflowComponents[n.kind].settings === "workflow" &&
+      (!n.target ||
+        !/^[a-z][a-z0-9-]{0,79}$/.test(n.target.workflow) ||
+        !Number.isSafeInteger(n.target.version) ||
+        n.target.version < 1)
+    )
+      return "Choose a published workflow version.";
     if (format === 1) {
       if (n.kind === "set" || n.predicate === undefined || n.output === undefined)
         return "Invalid suite node configuration.";
       continue;
     }
-    if (n.kind === "check") return "Suite checks belong to the suite template.";
-    if (n.kind === "branch" || n.kind === "set") {
+    if (format === 2 && n.kind === "check") return "Suite checks belong to the suite template.";
+    if (workflowComponents[n.kind].settings === "scalar") {
       if (!n.field?.trim() || n.field.length > 160)
         return "Enter a field name for " + n.label + ".";
       try {
@@ -242,18 +267,56 @@ const formats = {
   1: { prefix: "// iT3 visual workflow v1\nconst canvas = ", runtime: interpreter },
   2: { prefix: "// iT3 visual workflow v2\nconst canvas = ", runtime: genericInterpreter },
 } as const;
+const v3Prefix = "// iT3 visual workflow v3\nconst canvas = ";
+function registeredRuntime(doc: CanvasDocument) {
+  const legacy = doc.legacyVersions ?? 0;
+  const used = new Set(doc.revisions.slice(legacy).flatMap((g) => g.nodes.map((n) => n.kind)));
+  const handlers = [...used]
+    .sort()
+    .map((k) => "case " + JSON.stringify(k) + ": {" + workflowComponents[k].handler + " break;}")
+    .join("\n");
+  const old = legacy
+    ? genericInterpreter.replace(
+        "canvas.revisions.entries()",
+        "canvas.revisions.slice(0,canvas.legacyVersions).entries()",
+      )
+    : "";
+  return (
+    old +
+    "\n" +
+    `for(const [index,graph] of canvas.revisions.entries()){
+ if(index<${legacy})continue;
+ T3.workflow(canvas.name,{version:index+1,payload:Schema.Record(Schema.String,Schema.Json)},Effect.fn(function* (input){
+ let data=input,node=graph.nodes.find(n=>n.kind==="start");
+ while(node){const id=node.id;let port="next";
+ switch(node.kind){${handlers}}
+ const edge=graph.edges.find(e=>e.from===id && e.port===port);node=graph.nodes.find(n=>n.id===edge?.to);}
+ return yield* T3.stop("Missing workflow destination");
+ }));}\n`
+  );
+}
 export function canvasSource(doc: CanvasDocument) {
-  const { prefix, runtime } = formats[doc.format];
+  const { prefix, runtime } =
+    doc.format === 3 ? { prefix: v3Prefix, runtime: registeredRuntime(doc) } : formats[doc.format];
   return prefix + JSON.stringify(doc, null, 2) + ";\n" + runtime;
 }
 export function readCanvas(source: string): CanvasDocument | null {
-  const format = source.startsWith(formats[2].prefix) ? 2 : 1;
-  const { prefix, runtime } = formats[format];
-  if (!source.startsWith(prefix) || !source.endsWith(";\n" + runtime)) return null;
+  const format = source.startsWith(v3Prefix) ? 3 : source.startsWith(formats[2].prefix) ? 2 : 1;
+  const prefix = format === 3 ? v3Prefix : formats[format].prefix;
+  if (!source.startsWith(prefix)) return null;
   try {
-    const doc = decode(JSON.parse(source.slice(prefix.length, -(2 + runtime.length))));
-    return doc.format === format &&
-      doc.revisions.every((g) => !graphProblem(g) && !configurationProblem(g, format))
+    const end = source.indexOf(";\n", prefix.length);
+    const doc = decode(JSON.parse(source.slice(prefix.length, end)));
+    const runtime = format === 3 ? registeredRuntime(doc) : formats[format].runtime;
+    const legacy = doc.legacyVersions ?? 0;
+    return end >= 0 &&
+      doc.format === format &&
+      legacy <= doc.revisions.length &&
+      (!legacy || format === 3) &&
+      source.slice(end + 2) === runtime &&
+      doc.revisions.every(
+        (g, i) => !graphProblem(g) && !configurationProblem(g, i < legacy ? 2 : format),
+      )
       ? doc
       : null;
   } catch {
@@ -273,4 +336,120 @@ export function reviseCanvas(
         ? doc.revisions
         : [...doc.revisions, graph],
   };
+}
+
+export function suiteReviewPair(name: string, projectId: string | null) {
+  const childName = name.slice(0, 61) + "-suite-review";
+  const childGraph: CanvasGraph = {
+    nodes: [
+      { id: "start", kind: "start", label: "Suite report" },
+      { id: "read", kind: "suite-read", label: "Summarize outcomes" },
+      { id: "check", kind: "check", label: "Verify report" },
+      {
+        id: "branch",
+        kind: "branch",
+        label: "Any failures?",
+        field: "hasFailures",
+        literal: "true",
+      },
+      { id: "review", kind: "review", label: "Prepare a diagnosis brief?" },
+      { id: "brief", kind: "suite-brief", label: "Prepare brief" },
+      { id: "result", kind: "result", label: "Return evidence" },
+    ],
+    edges: [
+      { from: "start", port: "next", to: "read" },
+      { from: "read", port: "next", to: "check" },
+      { from: "check", port: "next", to: "branch" },
+      { from: "branch", port: "yes", to: "review" },
+      { from: "branch", port: "no", to: "result" },
+      { from: "review", port: "yes", to: "brief" },
+      { from: "review", port: "no", to: "result" },
+      { from: "brief", port: "next", to: "result" },
+    ],
+  };
+  const child: CanvasDocument = {
+    format: 3,
+    name: childName,
+    projectId,
+    revisions: [childGraph],
+    layout: {},
+  };
+  const parent: CanvasDocument = {
+    format: 3,
+    name,
+    projectId,
+    layout: {},
+    revisions: [
+      {
+        nodes: [
+          { id: "start", kind: "start", label: "Suite report" },
+          {
+            id: "review-suite",
+            kind: "subflow",
+            label: "Review test report",
+            target: { workflow: childName, version: 1 },
+          },
+          { id: "result", kind: "result", label: "Return evidence" },
+        ],
+        edges: [
+          { from: "start", port: "next", to: "review-suite" },
+          { from: "review-suite", port: "next", to: "result" },
+        ],
+      },
+    ],
+  };
+  return { parent, child };
+}
+
+export function extractSubflow(
+  graph: CanvasGraph,
+  ids: readonly string[],
+  name: string,
+  projectId: string | null,
+): { error: string } | { child: CanvasDocument; parent: CanvasGraph; entry: string } {
+  const chosen = new Set(ids),
+    nodes = graph.nodes.filter((n) => chosen.has(n.id));
+  if (!/^[a-z][a-z0-9-]{0,79}$/.test(name))
+    return { error: "Use a lowercase workflow name with letters, numbers and hyphens." };
+  if (!nodes.length || nodes.some((n) => n.kind === "start" || n.kind === "result"))
+    return { error: "Select inner steps between input and output." };
+  const enters = graph.edges.filter((e) => !chosen.has(e.from) && chosen.has(e.to));
+  const exits = graph.edges.filter((e) => chosen.has(e.from) && !chosen.has(e.to));
+  const entry = enters[0]?.to,
+    exit = exits[0]?.to;
+  if (!entry || !exit || enters.some((e) => e.to !== entry) || exits.some((e) => e.to !== exit))
+    return { error: "Select a region with one entry step and one shared destination." };
+  const fresh = (base: string) => {
+    let id = base;
+    while (chosen.has(id)) id += "-";
+    return id;
+  };
+  const start = fresh("input"),
+    result = fresh("output");
+  const inside: CanvasGraph = {
+    nodes: [
+      { id: start, kind: "start", label: "Input" },
+      ...nodes,
+      { id: result, kind: "result", label: "Output" },
+    ],
+    edges: [
+      { from: start, port: "next", to: entry },
+      ...graph.edges
+        .filter((e) => chosen.has(e.from))
+        .map((e) => (chosen.has(e.to) ? e : { ...e, to: result })),
+    ],
+  };
+  const parent: CanvasGraph = {
+    nodes: [
+      ...graph.nodes.filter((n) => !chosen.has(n.id)),
+      { id: entry, kind: "subflow", label: name, target: { workflow: name, version: 1 } },
+    ],
+    edges: [
+      ...graph.edges.filter((e) => !chosen.has(e.from)),
+      { from: entry, port: "next", to: exit },
+    ],
+  };
+  const error = graphProblem(inside) ?? graphProblem(parent);
+  if (error) return { error };
+  return { entry, parent, child: { name, projectId, format: 3, revisions: [inside], layout: {} } };
 }

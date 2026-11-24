@@ -621,3 +621,78 @@
 .choices input:focus-visible + span {
   outline: 2px solid var(--ring);
 }
+
+.runSummary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 16px;
+  background: var(--muted);
+  font-size: 12px;
+}
+.runSummary > span:last-child {
+  margin-left: auto;
+}
+.wire[data-trace="untaken"] {
+  opacity: 0.19;
+}
+.wire[data-trace="taken"] {
+  opacity: 1;
+}
+.card[data-trace="unvisited"] {
+  opacity: 0.52;
+}
+.card[data-trace="current"] {
+  border-width: 2px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 25%, transparent);
+}
+.palette .extractChoice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.palette .extractChoice input {
+  width: auto;
+}
+.palette > button:not(.choice) {
+  margin: 4px;
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.runSummary a,
+.subflowActions a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.subflowActions {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  font-size: 13px;
+}
+.subflowActions button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 9px;
+  background: var(--background);
+  cursor: pointer;
+}
+.subflowActions button:hover {
+  background: var(--muted);
+}
+
+.componentDetails {
+  margin-block: 6px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.componentDetails summary {
+  cursor: pointer;
+}
+.componentDetails p {
+  margin-top: 4px;
+}

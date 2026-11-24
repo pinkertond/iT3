@@ -3,8 +3,11 @@ import { workflowConnector } from "./WorkflowEdge";
 import { expect, it, vi } from "vite-plus/test";
 import { useState } from "react";
 import { render } from "../../../test/render";
-import { EnvironmentId } from "@t3tools/contracts";
+import { traceRun } from "./runOverlay";
+import { EnvironmentId, type WorkflowStep } from "@t3tools/contracts";
 import {
+  suiteReviewPair,
+  reviseCanvas,
   readCanvas,
   blankWorkflow,
   canvasSource,
@@ -72,16 +75,25 @@ vi.mock("~/state/query", async (original) => ({
     error: null,
   }),
 }));
-function Fixture({ files = [] }: { files?: readonly { name: string; source: string }[] } = {}) {
-  const [source, set] = useState<string | null>(null);
+function Fixture({
+  initialSource = null,
+  files = [],
+  registered = false,
+}: {
+  initialSource?: string | null;
+  registered?: boolean;
+  files?: readonly { name: string; source: string }[];
+} = {}) {
+  const [source, set] = useState<string | null>(initialSource);
   captures.save.mockImplementation(async ({ input }) => {
-    set(input.source);
+    if (input.name === "suite.flow.ts") set(input.source);
     return { _tag: "Success", value: { changed: true, problems: [] } };
   });
   captures.start.mockResolvedValue({ _tag: "Success", value: { runId: "R" } });
   return (
     <div style={{ height: 600, width: 1000, display: "flex" }}>
       <WorkflowCanvas
+        registered={registered}
         definitionFiles={files}
         composable
         env={EnvironmentId.make("local")}
@@ -243,5 +255,117 @@ it("joins the centre of the arrow's rear edge on rising, falling and backward pa
     const otherWing = triangle.getPointAtLength(Math.hypot(10, 4.5) + 9);
     expect(base.x).toBeCloseTo((wing.x + otherWing.x) / 2);
     expect(base.y).toBeCloseTo((wing.y + otherWing.y) / 2);
+  }
+});
+
+it("opens the suite review child and publishes its pinned parent", async () => {
+  captures.save.mockClear();
+  await using screen = await render(<Fixture registered />, { router: "/workflows" });
+  await screen.getByRole("button", { name: "Use suite template" }).click();
+  await screen.getByRole("button", { name: "Review test report", exact: true }).click();
+  await screen.getByRole("button", { name: "Inspect pinned subflow" }).click();
+  await expect.element(screen.getByRole("heading", { name: "suite-suite-review" })).toBeVisible();
+  await screen.getByRole("button", { name: "Back to parent" }).click();
+  await screen.getByRole("button", { name: "Publish", exact: true }).click();
+  const calls = captures.save.mock.calls.map((c) => c[0].input);
+  expect(calls.map((c) => c.name)).toEqual(["suite-suite-review.flow.ts", "suite.flow.ts"]);
+  expect(
+    readCanvas(calls[1]!.source)?.revisions[0]!.nodes.find((n) => n.kind === "subflow")?.target,
+  ).toEqual({ workflow: "suite-suite-review", version: 1 });
+});
+
+it("extracts a connected selection and publishes a reusable child", async () => {
+  captures.save.mockClear();
+  await using screen = await render(<Fixture registered />, { router: "/workflows" });
+  for (const label of ["Set field", "Output"]) {
+    await screen.getByRole("button", { name: "Add step", exact: true }).click();
+    await screen.getByRole("button", { name: label, exact: true }).click();
+  }
+  await screen.getByRole("button", { name: "Extract subflow", exact: true }).click();
+  await screen.getByRole("textbox", { name: "New workflow name" }).fill("priority");
+  await screen.getByRole("checkbox", { name: "Set field" }).click();
+  await screen.getByRole("button", { name: "Group selected steps" }).click();
+  await screen.getByRole("button", { name: "Publish", exact: true }).click();
+  const saved = captures.save.mock.calls.map(([call]) => readCanvas(call.input.source)!);
+  expect(saved.map((d) => d.name)).toEqual(["priority", "suite"]);
+  expect(saved[0]!.revisions[0]!.nodes.map((n) => n.kind)).toContain("set");
+  expect(saved[1]!.revisions[0]!.nodes.find((n) => n.kind === "subflow")?.target).toEqual({
+    workflow: "priority",
+    version: 1,
+  });
+});
+
+it("adopts an available child revision only in the new parent revision", async () => {
+  captures.save.mockClear();
+  const { parent, child } = suiteReviewPair("suite", "proj");
+  const graph = child.revisions[0]!;
+  const updated = reviseCanvas(
+    child,
+    {
+      ...graph,
+      nodes: graph.nodes.map((n) => (n.id === "read" ? { ...n, label: "Count outcomes" } : n)),
+    },
+    child.layout,
+  );
+  await using screen = await render(
+    <Fixture
+      registered
+      initialSource={canvasSource(parent)}
+      files={[{ name: child.name + ".flow.ts", source: canvasSource(updated) }]}
+    />,
+    { router: "/workflows" },
+  );
+  await screen.getByRole("button", { name: "Review test report", exact: true }).click();
+  await screen.getByRole("button", { name: "Adopt version 2" }).click();
+  await screen.getByRole("button", { name: "Publish", exact: true }).click();
+  const result = readCanvas(captures.save.mock.calls[0]![0].input.source)!;
+  expect(
+    result.revisions.map((g) => g.nodes.find((n) => n.kind === "subflow")?.target?.version),
+  ).toEqual([1, 2]);
+});
+
+it("attributes a converging connection to the recorded decision and stops at a pending question", () => {
+  const graph: CanvasGraph = {
+    nodes: [
+      { id: "start", kind: "start", label: "Input" },
+      { id: "ask", kind: "review", label: "Proceed?" },
+      { id: "done", kind: "result", label: "Done" },
+    ],
+    edges: [
+      { from: "start", port: "next", to: "ask" },
+      { from: "ask", port: "yes", to: "done" },
+      { from: "ask", port: "no", to: "done" },
+    ],
+  };
+  function step(
+    name: string,
+    status: WorkflowStep["status"] = "completed",
+    result: WorkflowStep["result"] = null,
+  ): WorkflowStep {
+    return {
+      name,
+      kind: name === "ask" ? "ask" : "step",
+      status,
+      result,
+      attempts: 1,
+      detail: null,
+      threadId: null,
+      environmentId: null,
+      said: null,
+      startedAt: "2026-01-01T00:00:00Z",
+      endedAt: null,
+    };
+  }
+  const waiting = traceRun(graph, { steps: [step("start"), step("ask", "running")] });
+  expect([...waiting.edges]).toEqual(["start/next"]);
+  expect(waiting.active).toBe("ask");
+  for (const [choice, port] of [
+    ["Yes", "yes"],
+    ["No", "no"],
+  ]) {
+    const ended = traceRun(graph, {
+      steps: [step("start"), step("ask", "completed", { choice: choice! }), step("done")],
+    });
+    expect([...ended.edges]).toEqual(["start/next", "ask/" + port]);
   }
 });

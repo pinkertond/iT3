@@ -662,9 +662,23 @@ export const invoke = <P, A>(
   return Effect.orDie(invokeAs(name, workflow, payload, options));
 };
 
+/** Invoke a pinned JSON workflow. The engine resolves the exact name and version at start. */
+export const invokeVersion = (
+  name: string,
+  target: string,
+  version: number,
+  payload: Schema.Json,
+) =>
+  Effect.orDie(
+    invokeAs<Schema.Json, Schema.Json>(
+      name,
+      { name: target, version, returns: Schema.Json },
+      payload,
+    ),
+  );
 const invokeAs = Effect.fn("workflow.invoke")(function* <P, A>(
   name: string,
-  workflow: WorkflowDefinition<P, A>,
+  workflow: Pick<WorkflowDefinition<P, A>, "name" | "version" | "returns">,
   payload: P,
   options?: { readonly key?: string },
 ): Effect.fn.Return<

@@ -64,6 +64,7 @@ export function WorkflowEdge({
   return (
     <Wire
       id={id}
+      trace={typeof data?.trace === "string" ? data.trace : undefined}
       port={port}
       active={data?.active === true}
       geometry={workflowConnector(
@@ -97,18 +98,20 @@ export function WorkflowConnectionPreview({
 }
 
 function Wire({
+  trace,
   id,
   port,
   active,
   geometry: { path, head, join },
 }: {
+  trace?: string | undefined;
   id?: string;
   port: CanvasPort;
   active: boolean;
   geometry: ReturnType<typeof workflowConnector>;
 }) {
   return (
-    <g className={styles.wire} data-port={port} data-active={active}>
+    <g className={styles.wire} data-port={port} data-trace={trace} data-active={active}>
       <BaseEdge
         {...(id ? { id } : { interactionWidth: 0 })}
         path={path}

@@ -53,7 +53,29 @@ for (const file of files) {
     realpathSync(absolute) !== absolute
   )
     continue;
-  const source = readFileSync(absolute, "utf8");
+  let source = readFileSync(absolute, "utf8");
+  if (file === "docs/design/agent-system/workflow-canvas.md") {
+    const { workflowComponents, componentAccess } =
+      await import("../../../packages/shared/src/it3WorkflowRegistry.ts");
+    source +=
+      "\n## Registered visual components\n\n| Component | Purpose | Input | Settings | Outputs | Required access |\n| --- | --- | --- | --- | --- | --- |\n" +
+      Object.values(workflowComponents)
+        .map(
+          (c) =>
+            "| " +
+            [
+              c.title,
+              c.description,
+              c.input,
+              c.settings,
+              c.ports.join(", ") || "Returns data",
+              componentAccess[c.permission].join(", "),
+            ].join(" | ") +
+            " |",
+        )
+        .join("\n") +
+      "\n";
+  }
   const base = { file, parent: null, links: [], status: "", summary: "" };
   if (file === "IT3_VERSION" || file === "VERSION" || file === "package.json") {
     const version = file === "package.json" ? JSON.parse(source).version : source.trim();

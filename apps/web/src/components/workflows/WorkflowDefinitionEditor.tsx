@@ -506,6 +506,7 @@ export default function WorkflowDefinitionEditor({
           >
             <WorkflowCanvas
               definitionFiles={files}
+              registered={capabilities?.it3WorkflowSubflows === true}
               composable={capabilities?.it3ComposableWorkflows === true}
               key={file}
               env={environmentId}

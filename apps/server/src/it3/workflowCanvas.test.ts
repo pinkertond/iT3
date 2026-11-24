@@ -5,6 +5,8 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
   canvasSource,
   blankWorkflow,
+  suiteReviewPair,
+  extractSubflow,
   configurationProblem,
   type CanvasGraph,
   graphProblem,
@@ -138,6 +140,67 @@ it.effect(
             completed.result,
             priority === "urgent" ? { priority, queue: "fast" } : { priority },
           );
+        }
+        const { parent, child } = suiteReviewPair("suite-parent", "p");
+        const childFile = child.name + ".flow.ts",
+          parentFile = parent.name + ".flow.ts",
+          childV1 = canvasSource(child);
+        assert.deepEqual(readCanvas(childV1), child);
+        assert.isFalse((yield* files.save(parentFile, canvasSource(parent), null)).changed);
+        assert.isTrue((yield* files.save(childFile, childV1, null)).changed);
+        assert.isTrue((yield* files.save(parentFile, canvasSource(parent), null)).changed);
+        assert.isFalse((yield* files.remove(childFile)).changed);
+        const childV2 = reviseCanvas(
+          child,
+          {
+            ...child.revisions[0]!,
+            nodes: child.revisions[0]!.nodes.map((n) =>
+              n.id === "branch" ? { ...n, literal: "false" } : n,
+            ),
+          },
+          child.layout,
+        );
+        assert.isTrue((yield* files.save(childFile, canvasSource(childV2), childV1)).changed);
+        const rewritten = { ...childV2, revisions: [childV2.revisions[1]!, childV2.revisions[1]!] };
+        assert.isFalse(
+          (yield* files.save(childFile, canvasSource(rewritten), canvasSource(childV2))).changed,
+        );
+        const foreign = { ...parent, name: "foreign-parent", projectId: "other" };
+        assert.isFalse(
+          (yield* files.save("foreign-parent.flow.ts", canvasSource(foreign), null)).changed,
+        );
+        const cycle = {
+          ...parent,
+          name: "cycle",
+          revisions: [
+            {
+              ...parent.revisions[0]!,
+              nodes: parent.revisions[0]!.nodes.map((n) =>
+                n.target ? { ...n, target: { workflow: "cycle", version: 1 } } : n,
+              ),
+            },
+          ],
+        };
+        assert.isFalse((yield* files.save("cycle.flow.ts", canvasSource(cycle), null)).changed);
+        const request = yield* engine.start(
+          parent.name,
+          { ...report, cases: [{ name: "green", outcome: "passed" }] },
+          { idempotencyKey: "pinned" },
+        );
+        const end = yield* engine.waitFor(request.runId, (r) =>
+          ["completed", "stopped", "paused"].includes(r.status),
+        );
+        assert.equal(end.status, "completed", JSON.stringify(end));
+        assert.deepInclude(end.result, { outcome: "reported", passed: 1 });
+        const receipt = (yield* engine.get(request.runId)).steps.find(
+          (s) => s.name === "review-suite/start",
+        )!;
+        assert.equal((yield* engine.get(String(receipt.result))).run.version, 1);
+        const nested = extractSubflow(routing, ["mark"], "rush-queue", "p");
+        assert.isTrue("child" in nested);
+        if ("child" in nested) {
+          assert.isNull(graphProblem(nested.parent));
+          assert.isNull(graphProblem(nested.child.revisions[0]!));
         }
         assert.deepEqual(yield* files.save(file, v1, null), { changed: true, problems: [] });
         assert.isFalse((yield* files.save(file, v1, null)).changed);

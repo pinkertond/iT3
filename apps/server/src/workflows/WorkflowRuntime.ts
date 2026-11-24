@@ -1,3 +1,4 @@
+import { recordCanvasDefinitions, canvasDependencyProblems } from "../it3/workflowDependencies.ts";
 // Workflows in the running server: every file in one folder defines some, and the folder can
 // change while the server runs. A file that loads replaces what it defined before; one that does
 // not keeps its last good version running. With no definitions there is no engine, unless runs
@@ -264,6 +265,7 @@ const definitionProblems = (
     if (!where.has(tag)) waiting.set(tag, (waiting.get(tag) ?? 0) + 1);
   }
   return [
+    ...canvasDependencyProblems(files, before),
     ...[...where]
       .filter(([, names]) => names.length > 1)
       .map(([tag, names]) => ({
@@ -421,6 +423,10 @@ export const make = Effect.fn("WorkflowRuntime.make")(function* <E, R>(
       Effect.provideContext(services),
       Effect.result,
     );
+    if (name.endsWith(".flow.ts") && definitions._tag === "Success") {
+      const source = yield* fileSystem.readFileString(from).pipe(Effect.orElseSucceed(() => ""));
+      recordCanvasDefinitions(source, definitions.success);
+    }
     return definitions._tag === "Failure"
       ? ({ problem: loadProblem(definitions.failure, from, name) } as const)
       : ({ definitions: definitions.success } as const);

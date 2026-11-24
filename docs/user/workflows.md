@@ -20,6 +20,16 @@ In **Add step → Project steps**, search by workflow or step name to reuse a pu
 
 The host saves a project-linked `<name>.flow.ts` file in the directory shown under **Definitions**. Two clients connected to the same host see its saved definitions. A semantic edit adds a version, and moving nodes only updates the layout. If another editor publishes first, reload the saved version before applying your changes. See [Visual project workflows](../design/agent-system/workflow-canvas.md) for the file format and supported nodes.
 
+### Reuse a workflow
+
+Choose **Add step → Subflows** to insert a published workflow from the current project. Select it and choose **Inspect pinned subflow** to see the exact revision it uses. **Back to parent** returns to the calling step. **Used by** lists references from the current published parent revisions.
+
+To turn part of an existing workflow into a component, choose **Extract subflow**, name it, select the steps and choose **Group selected steps**. The selection needs one entry step and one shared destination outside it. **Publish** saves the child first, then the parent. If the parent conflicts, the published child is available in **Subflows**. When a newer child revision is available, **Adopt version** updates the parent draft. Publish the parent to use it on new runs.
+
+### Follow a visual run
+
+Start a published workflow or choose **Inspect a previous run**. The header shows elapsed time, the last observed step, a pending question or run detail, and the number of steps visited. Follow the highlighted connections, select a step for its recorded result and attempts, or inspect a subflow to follow its child run. **Open native run** opens the host timeline and review controls. The suite template demonstrates this with a single **Review test report** step. Open it to see the checks, failure branch, human approval and diagnosis brief.
+
 ## Create a workflow
 
 Workflow files live in `~/.t3/workflows/` (or wherever `T3CODE_WORKFLOWS` points — a folder or a single file). The server watches the folder and reloads changes without a restart.

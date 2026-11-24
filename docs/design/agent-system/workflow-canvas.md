@@ -19,7 +19,7 @@ relations:
 **Available in iT3** — Open **Workspaces → project → Workflows → New visual workflow** on a host with **Settings → Labs → Workflows** enabled. Give the workflow a lowercase name and choose **Create**. The canvas opens with a single input. Add steps at an output port or select the suite template.
 
 1. Select a node to see its purpose and edit its label. For a human review, the label is the question the operator sees.
-2. Drag a connection between handles or choose a destination in the inspector. A condition compares a top-level input field to a JSON scalar. Set field writes a scalar, approval asks a question, and output returns the data. The optional suite template branches on failed or skipped tests. Both Yes and No need a destination. Each graph has one start, up to twelve reachable nodes and no cycles.
+2. Drag a connection between handles or choose a destination in the inspector. A condition compares a top-level input field to a JSON scalar. Set field writes a scalar, approval asks a question, and output returns the data. The suite template groups report processing into a pinned child workflow and branches on failed tests. Both Yes and No need a destination. Each graph has one start, up to twelve reachable nodes and no cycles.
 3. Choose **Publish**, then **Run workflow**. Run a blank-built workflow with a JSON object, or run the suite template with a completed suite report. For a pending review, open **Open native run** and answer the review. Select the result node to read its recorded evidence.
 4. Reopen the definition to inspect an earlier run. Editing a rule publishes a new execution version. Moving a node changes only its layout. A run waiting for an answer keeps its original rules across publishes and host restarts.
 
@@ -43,7 +43,13 @@ Start at one project. Choose **Team**, **Workflows**, or **Runs**. Each view ope
 
 The host currently stores one `<name>.flow.ts` in its native workflow definitions directory. Its `canvas` JSON contains the project ID, stable node IDs, port connections, semantic revisions and layout. Format 2 accepts JSON objects and describes reusable steps. Format 1 retains the suite template and its original execution rules. A human and an agent can read the same definition. Agents can edit the JSON while preserving prior revisions and the format's runtime wrapper. Workflows with custom TypeScript open in the native source editor. The project entry filters by project ID. Clients connected to the same host share published definitions and runs.
 
-The editor checks connectivity, ports and cycles before publication. It submits the source it last read so the host can reject stale edits. The native workflow engine stores the run history and journals one step per visited node. A Git-backed project catalog, subflows and focused agent authoring tools are future extensions.
+The editor checks connectivity, ports and cycles before publication. It submits the source it last read so the host can reject stale edits. The native workflow engine stores the run history and journals one step per visited node. Each native invocation records its child run ID in the parent journal. The canvas follows this receipt, the recorded branch result and the recorded approval answer to display the executed path.
+
+## Components and versions
+
+Format 3 adds components registered at build time and calls to exact child workflow versions. A project author creates reusable subflows in the editor. A developer adds new native behavior in `packages/shared/src/it3WorkflowRegistry.ts` by composing a trusted component collection with `registerComponents`. Supply a stable kind, title, description, icon, input shape, output ports, settings, access category and native journaled handler. Reuse an existing settings editor and icon or register their rendering in the web editor. The palette, validator, source emitter and generated component reference read this collection. Keep published handlers stable. Introduce a new kind or a new file format when changing execution semantics. Permission checks run on the host.
+
+The host validates same-project dependencies, rejects cycles and refuses removal of referenced versions. The editor retains older graph revisions on publish. A parent adopts a new child version explicitly. Format 2 can adopt registered components while preserving its existing execution versions. Older hosts keep their original editors.
 
 ## Execution and permissions
 

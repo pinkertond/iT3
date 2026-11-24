@@ -7,7 +7,10 @@ import { GitBranch, Play, Plus, Network, LayoutTemplate } from "lucide-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
   blankWorkflow,
+  suiteReviewPair,
+  type CanvasDocument,
   configurationProblem,
+  workflowComponents,
   type CanvasKind,
   canvasSource,
   graphProblem,
@@ -27,6 +30,9 @@ import { randomUUID } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import styles from "./workflowCanvas.module.css";
+import { ActivityStatus } from "../shared/ActivityStatus";
+import { descendantQuestion, traceRun } from "./runOverlay";
+import { ExtractSubflow } from "./ExtractSubflow";
 import { StepLibrary } from "./StepLibrary";
 
 import { StepInspector } from "./StepInspector";
@@ -49,6 +55,7 @@ const portLabels = { next: "Next", yes: "Yes", no: "No" };
 const fallbackPosition = (i: number) => ({ x: (i % 4) * 225, y: Math.floor(i / 4) * 150 });
 
 interface Props {
+  registered?: boolean;
   composable: boolean;
   definitionFiles: readonly { readonly name: string; readonly source: string }[];
   env: EnvironmentId;
@@ -62,6 +69,7 @@ interface Props {
   onDeleted: () => void;
 }
 export default function WorkflowCanvas({
+  registered = false,
   composable,
   definitionFiles,
   env,
@@ -76,7 +84,12 @@ export default function WorkflowCanvas({
 }: Props) {
   const gt = useGT();
   const persisted = source === null ? null : readCanvas(source);
-  const createBlank = composable ? blankWorkflow : suiteTemplate;
+  const createBlank = (name: string, project: string | null): CanvasDocument =>
+    registered
+      ? { ...blankWorkflow(name, project), format: 3 }
+      : composable
+        ? blankWorkflow(name, project)
+        : suiteTemplate(name, project);
   const initial = () => persisted ?? createBlank(file.replace(/\.flow\.ts$/, ""), projectId);
   const [doc, setDoc] = useState(initial),
     [graph, setGraph] = useState<CanvasGraph>(() => doc.revisions.at(-1)!);
@@ -89,12 +102,37 @@ export default function WorkflowCanvas({
   const [selected, select] = useState("start"),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
-  const suite = doc.format === 1;
+  const [drill, setDrill] = useState<
+    { doc: CanvasDocument; version: number; previous: string; runId: string | null }[]
+  >([]);
+  const [pending, setPending] = useState<CanvasDocument[]>([]);
+  const publishedChildren = useRef(new Map<string, string>());
+  const [extracting, setExtracting] = useState(false);
+  const layer = drill.at(-1),
+    viewDoc = layer?.doc ?? doc;
+  const suite = viewDoc.format === 1;
+  const canCompose = registered && !suite;
+  const catalog = definitionFiles.flatMap((f) => {
+    const d = f.name.endsWith(".flow.ts") ? readCanvas(f.source) : null;
+    return d && d.projectId === doc.projectId && f.name === d.name + ".flow.ts" ? [d] : [];
+  });
+  const documents = [...catalog, ...pending.filter((d) => !catalog.some((c) => c.name === d.name))];
   const library = nodeLibrary(gt, suite);
   const [palette, setPalette] = useState<{ from: string; port: CanvasPort } | null>(null);
   const fitCanvas = useRef<() => void>(() => {});
-  const [payload, setPayload] = useState(suite ? sample : '{\n  "status": "ready"\n}'),
+  const suiteInput =
+    suite ||
+    graph.nodes.some(
+      (n) =>
+        n.kind === "suite-read" ||
+        (n.target &&
+          documents
+            .find((d) => d.name === n.target?.workflow)
+            ?.revisions[n.target.version - 1]?.nodes.some((step) => step.kind === "suite-read")),
+    );
+  const [payload, setPayload] = useState(suiteInput ? sample : '{\n  "status": "ready"\n}'),
     [runId, setRunId] = useState<string | null>(null);
+  const viewingRun = layer ? layer.runId : runId;
   const [runForm, setRunForm] = useState(false);
   const released = useRef(false);
   const pendingStart = useRef<{ input: string; key: string } | null>(null);
@@ -107,9 +145,11 @@ export default function WorkflowCanvas({
     .filter((r) => r.workflow === doc.name && r.version <= doc.revisions.length)
     .slice(0, 12);
   const run = useEnvironmentQuery(
-    runId ? serverEnvironment.workflowRun({ environmentId: env, input: { runId } }) : null,
+    viewingRun
+      ? serverEnvironment.workflowRun({ environmentId: env, input: { runId: viewingRun } })
+      : null,
   );
-  const runData = run.data?.run.runId === runId ? run.data : null;
+  const runData = run.data?.run.runId === viewingRun ? run.data : null;
   const modified = graph !== doc.revisions.at(-1) || layout !== doc.layout;
   const dirty = base === null || modified;
   const stale =
@@ -119,6 +159,9 @@ export default function WorkflowCanvas({
   const unmanaged = source !== null && persisted?.name !== file.replace(/\.flow\.ts$/, "");
   const adopt = (text: string | null) => {
     const next = readCanvas(text ?? "") ?? createBlank(file.replace(/\.flow\.ts$/, ""), projectId);
+    setPending([]);
+    setDrill([]);
+    setExtracting(false);
     setDoc(next);
     setGraph(next.revisions.at(-1)!);
     setLayout(next.layout);
@@ -140,11 +183,34 @@ export default function WorkflowCanvas({
     enableBeforeUnload: () => modified && !released.current,
   });
   const latest = doc.revisions.length;
-  const shown = runData ? (doc.revisions[runData.run.version - 1] ?? graph) : graph;
-  const steps = new Map(runData?.steps.map((s) => [s.name, s]));
+  const shown = layer
+    ? layer.doc.revisions[layer.version - 1]!
+    : runData
+      ? (doc.revisions[runData.run.version - 1] ?? graph)
+      : graph;
+  const shownLayout = layer ? { ...arrangeNodes(shown), ...layer.doc.layout } : layout;
+  const trace = traceRun(shown, runData),
+    steps = trace.steps;
+  const waitingQuestion = history.data?.questions?.find((q) => q.runId === viewingRun);
+  const childReceipt = trace.active && steps.get(trace.active + "/start")?.result;
+  const childQuestion =
+    typeof childReceipt === "string"
+      ? descendantQuestion(childReceipt, history.data?.runs ?? [], history.data?.questions ?? [])
+      : null;
+  const question = waitingQuestion ?? childQuestion;
+  const state = question ? "needs-input" : runData?.run.status;
   const node = shown.nodes.find((n) => n.id === selected) ?? shown.nodes[0]!;
-  const problem = configurationProblem(graph, doc.format) ?? graphProblem(graph);
-  const locked = !writable || offline || busy || runId !== null;
+  const problem =
+    configurationProblem(graph, registered && doc.format === 2 ? 3 : doc.format) ??
+    graphProblem(graph);
+  const locked = !writable || offline || busy || runId !== null || !!layer;
+  const child = node.target && documents.find((d) => d.name === node.target?.workflow);
+  const parentPins = documents.flatMap((d) =>
+    d.revisions
+      .at(-1)!
+      .nodes.filter((n) => n.kind === "subflow" && n.target?.workflow === viewDoc.name)
+      .map((n) => ({ name: d.name, step: n.id, version: n.target!.version })),
+  );
   const patchNode = (patch: Partial<CanvasNode>) =>
     setGraph({
       ...graph,
@@ -169,6 +235,7 @@ export default function WorkflowCanvas({
   const origin = palette && graph.nodes.find((n) => n.id === palette.from);
   const fit = () => requestAnimationFrame(() => fitCanvas.current());
   const openPalette = (from: string, port: CanvasPort) => {
+    setExtracting(false);
     select(from);
     setPalette({ from, port });
   };
@@ -184,7 +251,7 @@ export default function WorkflowCanvas({
       ? { ...preset, id }
       : suite
         ? { id, kind, label, predicate: "failed", output: "summary" }
-        : kind === "branch" || kind === "set"
+        : workflowComponents[kind].settings === "scalar"
           ? { id, kind, label, field: "status", literal: '"ready"' }
           : { id, kind, label };
     const edges = graph.edges.filter((e) => e !== onward);
@@ -223,12 +290,47 @@ export default function WorkflowCanvas({
   };
   const publish = async () => {
     if (locked || stale || problem) return;
+    const upgrading =
+      registered &&
+      doc.format === 2 &&
+      graph.nodes.some((n) => !["start", "branch", "set", "result", "review"].includes(n.kind));
+    const targetDoc = upgrading
+      ? { ...doc, format: 3 as const, legacyVersions: base === null ? 0 : doc.revisions.length }
+      : doc;
     const next =
-        base === null ? { ...doc, revisions: [graph], layout } : reviseCanvas(doc, graph, layout),
+        base === null
+          ? { ...targetDoc, revisions: [graph], layout }
+          : reviseCanvas(targetDoc, graph, layout),
       text = canvasSource(next);
     setBusy(true);
     setMessage("");
     try {
+      for (const childDoc of pending) {
+        const childFile = childDoc.name + ".flow.ts",
+          source = canvasSource(childDoc);
+        const existing = definitionFiles.find((f) => f.name === childFile);
+        if (
+          existing?.source === source ||
+          (!existing && publishedChildren.current.get(childFile) === source)
+        )
+          continue;
+        const written = await save({
+          environmentId: env,
+          input: { name: childFile, source, expectedSource: null },
+        });
+        if (written._tag !== "Success") {
+          setMessage(String(squashAtomCommandFailure(written)));
+          return;
+        }
+        if (!written.value.changed || written.value.problems.length) {
+          setMessage(
+            written.value.problems.map((p) => p.message).join("\n") ||
+              gt("The subflow could not be published."),
+          );
+          return;
+        }
+        publishedChildren.current.set(childFile, source);
+      }
       const result = await save({
         environmentId: env,
         input: { name: file, source: text, expectedSource: base },
@@ -239,6 +341,8 @@ export default function WorkflowCanvas({
       }
       setMessage(result.value.problems.map((p) => p.message).join("\n") || gt("Published"));
       if (result.value.changed) {
+        publishedChildren.current.clear();
+        setPending([]);
         setWriteEcho({ previous: base, saved: text });
         setBase(text);
         setDoc(next);
@@ -290,7 +394,15 @@ export default function WorkflowCanvas({
       setBusy(false);
     }
   };
-  const status = runData?.run.status;
+  const stepState = (id: string) => {
+    const recorded = steps.get(id)?.status ?? (steps.has(id + "/start") ? "running" : null);
+    if (waitingQuestion?.name === id || (childQuestion && trace.active === id))
+      return "needs-input";
+    if (trace.active === id && recorded === "running" && runData) return runData.run.status;
+    return recorded;
+  };
+  const observed = steps.get(node.id);
+  const evidence = observed?.result ?? observed?.detail;
   if (unmanaged && base === source)
     return (
       <div className={styles.notice}>
@@ -310,15 +422,29 @@ export default function WorkflowCanvas({
             <GitBranch size={14} />
             <T>Workflow canvas</T>
           </div>
-          <h2>{doc.name}</h2>
+          <h2>{viewDoc.name}</h2>
         </div>
         <span className={styles.meta}>
-          {base === null
-            ? gt("Draft")
-            : gt("Version {version}", { version: runData?.run.version ?? latest })}
+          {layer
+            ? gt("Version {version}", { version: layer.version })
+            : base === null
+              ? gt("Draft")
+              : gt("Version {version}", { version: runData?.run.version ?? latest })}
           {dirty && base !== null && " · " + gt("Unpublished")}
         </span>
-        {runId ? (
+        {layer ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              select(layer.previous);
+              setDrill(drill.slice(0, -1));
+              fit();
+            }}
+          >
+            <T>Back to parent</T>
+          </Button>
+        ) : runId ? (
           <>
             <Button size="sm" variant="outline" onClick={() => setRunId(null)}>
               <T>Back to editing</T>
@@ -379,6 +505,35 @@ export default function WorkflowCanvas({
           <T>Host disconnected</T>
         </div>
       )}
+      {runData && (
+        <div className={styles.runSummary}>
+          <ActivityStatus
+            state={state ?? runData.run.status}
+            startedAt={runData.run.startedAt}
+            endedAt={runData.run.endedAt}
+          />
+          <strong>{shown.nodes.find((n) => n.id === trace.active)?.label}</strong>
+          <span>
+            {question &&
+            typeof question.request === "object" &&
+            question.request &&
+            "title" in question.request
+              ? String(question.request.title)
+              : runData.run.detail}
+          </span>
+          {childQuestion && typeof childReceipt === "string" && (
+            <Link to="/workflows" search={{ env, run: childQuestion.runId }}>
+              <T>Open child question</T>
+            </Link>
+          )}
+          <span>
+            {gt("{count} of {total} steps visited", {
+              count: trace.visited.size,
+              total: shown.nodes.length,
+            })}
+          </span>
+        </div>
+      )}
       {runForm && (
         <form
           className={styles.input}
@@ -407,7 +562,7 @@ export default function WorkflowCanvas({
             nodes={shown.nodes.map((n, i) => ({
               id: n.id,
               type: "card",
-              position: layout[n.id] ?? fallbackPosition(i),
+              position: shownLayout[n.id] ?? fallbackPosition(i),
               data: {
                 node: n,
                 suite,
@@ -417,7 +572,14 @@ export default function WorkflowCanvas({
                 canInsert: !locked && graph.nodes.length < 12,
                 onInsert: (port: CanvasPort) => openPalette(n.id, port),
                 selected: n.id === node.id,
-                status: steps.get(n.id)?.status ?? null,
+                trace: runData
+                  ? n.id === trace.active
+                    ? "current"
+                    : trace.visited.has(n.id)
+                      ? "visited"
+                      : "unvisited"
+                  : null,
+                status: stepState(n.id),
               },
             }))}
             edges={shown.edges.map((e) => ({
@@ -426,7 +588,16 @@ export default function WorkflowCanvas({
               sourceHandle: e.port,
               target: e.to,
               type: "workflow",
-              data: { active: e.from === node.id || e.to === node.id },
+              data: {
+                active: runData
+                  ? trace.edges.has(e.from + "/" + e.port)
+                  : e.from === node.id || e.to === node.id,
+                trace: runData
+                  ? trace.edges.has(e.from + "/" + e.port)
+                    ? "taken"
+                    : "untaken"
+                  : undefined,
+              },
             }))}
             connectionLineComponent={WorkflowConnectionPreview}
             edgeTypes={edgeTypes}
@@ -463,6 +634,7 @@ export default function WorkflowCanvas({
                   type="button"
                   disabled={locked || graph.nodes.length >= 12}
                   onClick={() => {
+                    setExtracting(false);
                     if (palette) {
                       setPalette(null);
                       return;
@@ -493,38 +665,71 @@ export default function WorkflowCanvas({
                   <Network size={15} />
                   <T>Arrange</T>
                 </button>
-                {base === null && suite && composable && (
+                {canCompose && !locked && (
                   <button
                     type="button"
-                    disabled={locked}
-                    onClick={async () => {
-                      if (
-                        modified &&
-                        !(await requestConfirmDialog(
-                          gt("Replace this draft with a blank workflow?"),
-                        ))
-                      )
-                        return;
-                      const blank = blankWorkflow(doc.name, projectId);
-                      setDoc(blank);
-                      setGraph(blank.revisions[0]!);
-                      setLayout(blank.layout);
-                      select("start");
-                      setPayload("{}");
+                    disabled={!!problem || graph.nodes.length < 3}
+                    onClick={() => {
+                      setExtracting(!extracting);
                       setPalette(null);
-                      fit();
                     }}
                   >
-                    <Plus size={15} />
-                    <T>Start blank</T>
+                    <Network size={15} />
+                    <T>Extract subflow</T>
                   </button>
                 )}
-                {base === null && !modified && !suite && (
+                {base === null &&
+                  (suite ||
+                    pending.length > 0 ||
+                    graph.nodes.some((n) => n.id === "review-suite")) &&
+                  composable &&
+                  !layer && (
+                    <button
+                      type="button"
+                      disabled={locked}
+                      onClick={async () => {
+                        if (
+                          modified &&
+                          !(await requestConfirmDialog(
+                            gt("Replace this draft with a blank workflow?"),
+                          ))
+                        )
+                          return;
+                        const blank = createBlank(doc.name, projectId);
+                        publishedChildren.current.clear();
+                        setPending([]);
+                        setDoc(blank);
+                        setGraph(blank.revisions[0]!);
+                        setLayout(blank.layout);
+                        select("start");
+                        setPayload("{}");
+                        setPalette(null);
+                        fit();
+                      }}
+                    >
+                      <Plus size={15} />
+                      <T>Start blank</T>
+                    </button>
+                  )}
+                {base === null && !modified && !suite && !layer && !pending.length && (
                   <button
                     type="button"
                     disabled={locked}
                     onClick={() => {
-                      const template = suiteTemplate(doc.name, projectId);
+                      const pair = registered ? suiteReviewPair(doc.name, projectId) : null;
+                      const template = pair?.parent ?? suiteTemplate(doc.name, projectId);
+                      if (pair) {
+                        const existing = documents.find((d) => d.name === pair.child.name);
+                        if (
+                          existing &&
+                          JSON.stringify(readCanvas(canvasSource(pair.child))?.revisions[0]) !==
+                            JSON.stringify(existing.revisions[0])
+                        ) {
+                          setMessage(gt("The suite template name is already in use."));
+                          return;
+                        }
+                        setPending(existing ? [] : [pair.child]);
+                      }
                       setDoc(template);
                       setGraph(template.revisions[0]!);
                       setLayout(arrangeNodes(template.revisions[0]!));
@@ -538,9 +743,31 @@ export default function WorkflowCanvas({
                   </button>
                 )}
               </div>
+              {extracting && !locked && (
+                <ExtractSubflow
+                  graph={graph}
+                  projectId={doc.projectId}
+                  names={[
+                    doc.name,
+                    ...definitionFiles.map((f) => f.name.replace(/\.flow\.ts$/, "")),
+                    ...pending.map((d) => d.name),
+                  ]}
+                  close={() => setExtracting(false)}
+                  apply={(child, parent, entry) => {
+                    setPending([...pending, child]);
+                    setGraph(parent);
+                    setLayout(arrangeNodes(parent));
+                    select(entry);
+                    setExtracting(false);
+                    fit();
+                  }}
+                />
+              )}
               {palette && origin && !locked && (
                 <StepLibrary
                   key={origin.id + "/" + palette.port}
+                  subflows={documents.filter((d) => d.name !== doc.name)}
+                  registered={canCompose}
                   definitionFiles={definitionFiles}
                   projectId={doc.projectId}
                   suite={suite}
@@ -573,31 +800,123 @@ export default function WorkflowCanvas({
             add={(port) => openPalette(node.id, port)}
             remove={removeNode}
           />
-          {runId ? (
+          {node.target && (
+            <section className={styles.subflowActions}>
+              <strong>
+                {node.target.workflow} · v{node.target.version}
+              </strong>
+              {child && child.revisions[node.target.version - 1] && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const id = steps.get(node.id + "/start")?.result;
+                    setDrill([
+                      ...drill,
+                      {
+                        doc: child,
+                        version: node.target!.version,
+                        previous: node.id,
+                        runId: typeof id === "string" ? id : null,
+                      },
+                    ]);
+                    select(
+                      child.revisions[node.target!.version - 1]!.nodes.find(
+                        (n) => n.kind === "start",
+                      )!.id,
+                    );
+                    setPalette(null);
+                    fit();
+                  }}
+                >
+                  <T>Inspect pinned subflow</T>
+                </button>
+              )}
+              {child && !locked && child.revisions.length > node.target.version && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    patchNode({ target: { workflow: child.name, version: child.revisions.length } })
+                  }
+                >
+                  {gt("Adopt version {version}", { version: child.revisions.length })}
+                </button>
+              )}
+              {child && catalog.some((d) => d.name === child.name) && (
+                <Link
+                  to="/workflows"
+                  search={{
+                    env,
+                    ...(doc.projectId ? { project: doc.projectId } : {}),
+                    definitions: true,
+                    file: child.name + ".flow.ts",
+                    visual: true,
+                  }}
+                >
+                  <T>Edit published subflow</T>
+                </Link>
+              )}
+            </section>
+          )}
+          {!!parentPins.length && (
+            <details>
+              <summary>
+                <T>Used by</T> ({parentPins.length})
+              </summary>
+              {parentPins.map((p) => (
+                <p key={p.name + "/" + p.step}>
+                  <Link
+                    to="/workflows"
+                    search={{
+                      env,
+                      ...(doc.projectId ? { project: doc.projectId } : {}),
+                      definitions: true,
+                      file: p.name + ".flow.ts",
+                      visual: true,
+                    }}
+                  >
+                    {p.name}
+                  </Link>{" "}
+                  · {p.step} · v{p.version}
+                </p>
+              ))}
+            </details>
+          )}
+          {viewingRun ? (
             <section>
               <h3>
                 <T>Run evidence</T>
               </h3>
-              <p>{run.error ?? status ?? gt("Loading run…")}</p>
-              {steps.has(node.id) ? (
-                <pre>
-                  {JSON.stringify(
-                    steps.get(node.id)?.result ??
-                      steps.get(node.id)?.detail ??
-                      steps.get(node.id)?.status,
-                    null,
-                    2,
-                  )}
-                </pre>
-              ) : (
+              {(run.error || !runData) && <p>{run.error ?? gt("Loading run…")}</p>}
+              {observed && (
                 <p>
-                  <T>No recorded step here.</T>
+                  <ActivityStatus
+                    state={stepState(node.id) ?? observed.status}
+                    startedAt={observed.startedAt}
+                    endedAt={observed.endedAt ?? runData?.run.endedAt}
+                  />
+                  {" · "}
+                  {observed.attempts === 1
+                    ? gt("1 attempt")
+                    : gt("{count} attempts", { count: observed.attempts })}
+                </p>
+              )}
+              {layer && (
+                <Link to="/workflows" search={{ env, run: viewingRun }}>
+                  <T>Open native run</T>
+                </Link>
+              )}
+              {evidence != null && <pre>{JSON.stringify(evidence, null, 2)}</pre>}
+              {!observed && runData && (
+                <p>
+                  {steps.has(node.id + "/start")
+                    ? gt("Child workflow started.")
+                    : gt("No recorded step here.")}
                 </p>
               )}
             </section>
           ) : (
             <>
-              {recent.length > 0 && (
+              {!layer && recent.length > 0 && (
                 <section>
                   <label>
                     <T>Inspect a previous run</T>
@@ -624,7 +943,7 @@ export default function WorkflowCanvas({
                   </label>
                 </section>
               )}
-              {problem && (
+              {!layer && problem && (
                 <p className={styles.validation} role="status">
                   {graph.nodes.length === 1
                     ? gt("Choose Add step to connect your first step.")

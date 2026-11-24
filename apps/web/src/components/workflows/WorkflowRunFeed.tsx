@@ -1,3 +1,4 @@
+import { ActivityStatus } from "../../it3/shared/ActivityStatus";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -481,6 +482,13 @@ export function WorkflowRunFeed({
           </div>
           <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
             <WorkflowChip name={run.workflow} />
+            <ActivityStatus
+              state={
+                run.status === "waiting" && node.questions.length > 0 ? "needs-input" : run.status
+              }
+              startedAt={run.startedAt}
+              endedAt={run.endedAt}
+            />
             <span>{run.workflow}</span>
             <span aria-hidden>·</span>
             <span>

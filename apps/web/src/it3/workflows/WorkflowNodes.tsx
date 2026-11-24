@@ -11,54 +11,65 @@ import {
   LogIn,
   Plus,
   UserRound,
+  Workflow,
+  ListChecks,
+  ClipboardList,
 } from "lucide-react";
 import { useGT } from "gt-react";
 import {
   portsFor,
+  workflowComponents,
   type CanvasGraph,
   type CanvasKind,
   type CanvasNode,
   type CanvasPort,
 } from "@t3tools/shared/it3WorkflowGraph";
+import { ActivityStatus } from "../shared/ActivityStatus";
 import styles from "./workflowCanvas.module.css";
 
 export function nodeLibrary(gt: ReturnType<typeof useGT>, suite: boolean) {
-  return {
-    start: {
-      icon: LogIn,
-      title: gt("Input"),
-      hint: suite ? gt("Summarize the suite report") : gt("Receive a JSON object"),
-    },
-    set: { icon: Braces, title: gt("Set field"), hint: gt("Write a value into the data") },
-    check: {
-      icon: CheckCheck,
-      title: gt("Check report"),
-      hint: gt("Require a completed test suite"),
-    },
-    branch: {
-      icon: GitBranch,
-      title: gt("Condition"),
-      hint: suite ? gt("Branch on test outcomes") : gt("Compare a field with a value"),
-    },
-    review: { icon: UserRound, title: gt("Approval"), hint: gt("Ask a person to choose a path") },
-    result: {
-      icon: Flag,
-      title: gt("Output"),
-      hint: suite ? gt("Return the suite result") : gt("Return the current data"),
-    },
+  const icons = {
+    LogIn,
+    Braces,
+    GitBranch,
+    UserRound,
+    Flag,
+    Workflow,
+    ListChecks,
+    CheckCheck,
+    ClipboardList,
   };
+  const entries = Object.entries(workflowComponents).map(
+    ([key, c]) =>
+      [
+        key,
+        {
+          title: gt(c.title),
+          icon: icons[c.icon],
+          hint:
+            suite && key === "start"
+              ? gt("Summarize the suite report")
+              : suite && key === "branch"
+                ? gt("Branch on test outcomes")
+                : suite && key === "result"
+                  ? gt("Return the suite result")
+                  : gt(c.description),
+        },
+      ] as const,
+  );
+  return Object.fromEntries(entries) as Record<CanvasKind, (typeof entries)[number][1]>;
 }
-export const insertableKinds = (suite: boolean): readonly CanvasKind[] => [
-  suite ? "check" : "set",
-  "branch",
-  "review",
-  "result",
-];
-
+export const insertableKinds = (suite: boolean, registered = false): readonly CanvasKind[] =>
+  registered
+    ? (Object.keys(workflowComponents) as CanvasKind[]).filter(
+        (k) => k !== "start" && k !== "subflow",
+      )
+    : [suite ? "check" : "set", "branch", "review", "result"];
 type CardData = {
   node: CanvasNode;
   selected: boolean;
   status: string | null;
+  trace: "current" | "visited" | "unvisited" | null;
   suite: boolean;
   open: readonly CanvasPort[];
   canInsert: boolean;
@@ -80,12 +91,15 @@ export function WorkflowCard({ data }: NodeProps<Node<CardData>>) {
         ? node.predicate === "skipped"
           ? gt("Has skipped tests")
           : gt("Has failed tests")
-        : hint;
+        : node.kind === "subflow" && node.target
+          ? node.target.workflow + " · v" + node.target.version
+          : hint;
   return (
     <div
       className={styles.card}
       data-kind={node.kind}
       data-selected={selected}
+      data-trace={data.trace ?? undefined}
       data-status={status ?? undefined}
     >
       {node.kind !== "start" && (
@@ -99,7 +113,7 @@ export function WorkflowCard({ data }: NodeProps<Node<CardData>>) {
       </div>
       <strong>{node.label}</strong>
       <div className={styles.detail}>{detail}</div>
-      {status && <small>{status}</small>}
+      {status && <ActivityStatus state={status} />}
       {ports.length > 0 && (
         <div className={styles.sockets}>
           {ports.map((port) => (

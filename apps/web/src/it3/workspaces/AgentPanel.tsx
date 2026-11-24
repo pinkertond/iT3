@@ -1,3 +1,4 @@
+import { ActivityStatus } from "../shared/ActivityStatus";
 import { resolveRuntimeModeOption } from "~/components/chat/runtimeModeConfig";
 import { BranchUsage } from "./ProjectUsage";
 import { TaskReference } from "./ProjectLibrary";
@@ -67,15 +68,28 @@ function Roster({ selected: t }: { selected: EnvironmentThreadShell }) {
       <span>
         <strong>{agent.title}</strong>
         <small>
-          {agent.hasPendingApprovals || agent.pendingSubagentRequest === "approval"
-            ? gt("Needs approval")
-            : needsAttention(agent)
-              ? gt("Needs input")
-              : working(agent)
-                ? gt("Working")
-                : agent.blockedOnThreadWait || agent.runtime?.status === "waiting"
-                  ? gt("Waiting")
-                  : gt("Idle")}{" "}
+          <ActivityStatus
+            state={
+              needsAttention(agent)
+                ? "needs-input"
+                : working(agent)
+                  ? "running"
+                  : agent.blockedOnThreadWait || agent.runtime?.status === "waiting"
+                    ? "waiting"
+                    : "idle"
+            }
+            label={
+              agent.hasPendingApprovals || agent.pendingSubagentRequest === "approval"
+                ? gt("Needs approval")
+                : needsAttention(agent)
+                  ? gt("Needs input")
+                  : working(agent)
+                    ? gt("Working")
+                    : agent.blockedOnThreadWait || agent.runtime?.status === "waiting"
+                      ? gt("Waiting")
+                      : gt("Idle")
+            }
+          />{" "}
           · {agent.modelSelection?.model}
         </small>
         {!!tree.activeBelow.get(agent.id) && (
@@ -124,11 +138,22 @@ function Roster({ selected: t }: { selected: EnvironmentThreadShell }) {
           </nav>
           <h2>{t.title}</h2>
           <p>
-            {working(t)
-              ? gt("Working")
-              : needsAttention(t)
-                ? gt("Needs attention")
-                : (t.runtime?.status ?? gt("Idle"))}{" "}
+            <ActivityStatus
+              state={
+                needsAttention(t)
+                  ? "needs-input"
+                  : working(t)
+                    ? "running"
+                    : (t.runtime?.status ?? "idle")
+              }
+              label={
+                needsAttention(t)
+                  ? gt("Needs attention")
+                  : working(t)
+                    ? gt("Working")
+                    : (t.runtime?.status ?? gt("Idle"))
+              }
+            />{" "}
             · {t.modelSelection?.model}
           </p>
           <p>

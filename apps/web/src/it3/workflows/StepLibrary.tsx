@@ -1,12 +1,19 @@
 import { useState } from "react";
 import { T, useGT } from "gt-react";
 import { X } from "lucide-react";
-import { readCanvas, type CanvasKind, type CanvasNode } from "@t3tools/shared/it3WorkflowGraph";
+import {
+  readCanvas,
+  type CanvasDocument,
+  type CanvasKind,
+  type CanvasNode,
+} from "@t3tools/shared/it3WorkflowGraph";
 import { nodeLibrary, insertableKinds } from "./WorkflowNodes";
 import styles from "./workflowCanvas.module.css";
 
 interface Props {
   definitionFiles: readonly { name: string; source: string }[];
+  registered: boolean;
+  subflows: readonly CanvasDocument[];
   projectId: string | null;
   suite: boolean;
   connection: string;
@@ -16,6 +23,8 @@ interface Props {
 }
 type Choice = { key: string; kind: CanvasKind; title: string; detail: string; preset?: CanvasNode };
 export function StepLibrary({
+  registered,
+  subflows,
   definitionFiles,
   projectId,
   suite,
@@ -26,20 +35,26 @@ export function StepLibrary({
 }: Props) {
   const gt = useGT();
   const library = nodeLibrary(gt, suite);
-  const [project, setProject] = useState(false);
+  const [project, setProject] = useState<"blocks" | "steps" | "flows">("blocks");
   const [search, setSearch] = useState("");
-  const blocks = insertableKinds(suite).map((kind): Choice => ({
+  const blocks = insertableKinds(suite, registered).map((kind): Choice => ({
     key: kind,
     kind,
     title: library[kind].title,
     detail: library[kind].hint,
   }));
   const published =
-    project && projectId
+    project === "steps" && projectId
       ? definitionFiles.flatMap((file) => {
           if (!file.name.endsWith(".flow.ts")) return [];
           const saved = readCanvas(file.source);
-          if (!saved || saved.projectId !== projectId || (saved.format === 1) !== suite) return [];
+          if (
+            !saved ||
+            saved.projectId !== projectId ||
+            (saved.format === 1) !== suite ||
+            (!registered && saved.format === 3)
+          )
+            return [];
           const version = saved.revisions.length;
           return saved.revisions[version - 1]!.nodes.filter((n) => n.kind !== "start").map(
             (n): Choice => ({
@@ -52,11 +67,24 @@ export function StepLibrary({
           );
         })
       : [];
-  const choices = project
-    ? published.filter((n) =>
-        (n.title + " " + n.detail).toLowerCase().includes(search.toLowerCase()),
-      )
-    : blocks;
+  const pins = subflows.map((d): Choice => ({
+    key: d.name,
+    kind: "subflow",
+    title: d.name,
+    detail: gt("Version {version}", { version: d.revisions.length }),
+    preset: {
+      id: "subflow",
+      kind: "subflow",
+      label: d.name,
+      target: { workflow: d.name, version: d.revisions.length },
+    },
+  }));
+  const choices =
+    project !== "blocks"
+      ? (project === "flows" ? pins : published).filter((n) =>
+          (n.title + " " + n.detail).toLowerCase().includes(search.toLowerCase()),
+        )
+      : blocks;
   return (
     <div
       className={styles.palette}
@@ -75,17 +103,34 @@ export function StepLibrary({
         </button>
       </div>
       <p>{connection}</p>
-      {projectId && (
+      {(projectId || registered) && (
         <div className={styles.libraryTabs}>
-          <button type="button" aria-pressed={!project} onClick={() => setProject(false)}>
+          <button
+            type="button"
+            aria-pressed={project === "blocks"}
+            onClick={() => setProject("blocks")}
+          >
             <T>Building blocks</T>
           </button>
-          <button type="button" aria-pressed={project} onClick={() => setProject(true)}>
+          <button
+            type="button"
+            aria-pressed={project === "steps"}
+            onClick={() => setProject("steps")}
+          >
             <T>Project steps</T>
           </button>
+          {registered && (
+            <button
+              type="button"
+              aria-pressed={project === "flows"}
+              onClick={() => setProject("flows")}
+            >
+              <T>Subflows</T>
+            </button>
+          )}
         </div>
       )}
-      {project && (
+      {project !== "blocks" && (
         <input
           aria-label={gt("Find a project step")}
           placeholder={gt("Find a project step")}

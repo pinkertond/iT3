@@ -166,6 +166,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   projectOrganization: Schema.optionalKey(Schema.Boolean),
   it3WorkflowCanvas: Schema.optionalKey(Schema.Boolean),
   it3ComposableWorkflows: Schema.optionalKey(Schema.Boolean),
+  it3WorkflowSubflows: Schema.optionalKey(Schema.Boolean),
   it3QueuePreview: Schema.optionalKey(Schema.Boolean),
   it3Tasks: Schema.optionalKey(Schema.Boolean),
   it3AgentView: Schema.optionalKey(Schema.Boolean),

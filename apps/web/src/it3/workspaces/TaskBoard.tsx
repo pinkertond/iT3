@@ -1,3 +1,4 @@
+import { ActivityStatus } from "../shared/ActivityStatus";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { QueueStepForm } from "./QueueForms";
@@ -228,7 +229,7 @@ export function TaskBoard({
                 <small>{t.key}</small>
               </span>
               <small>
-                {t.stage} {t.owner}
+                <ActivityStatus state={t.stage} /> {t.owner}
               </small>
             </button>
           ))}
@@ -380,7 +381,7 @@ function Attempt({
   return (
     <article className={styles["task-attempt"]}>
       <h3>
-        {gt("Attempt")} {a.number} · {a.stage}
+        {gt("Attempt")} {a.number} · <ActivityStatus state={a.stage} />
       </h3>
       <p>
         {a.owner ? (

@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import {
   portsFor,
+  componentAccess,
+  workflowComponents,
   type CanvasGraph,
   type CanvasNode,
   type CanvasPort,
@@ -47,7 +49,7 @@ export function StepInspector({
   const [editing, setEditing] = useState(false),
     [choosing, setChoosing] = useState<CanvasPort | null>(null);
   const { icon: Icon, title, hint } = library[node.kind];
-  const configurable = !suite && (node.kind === "branch" || node.kind === "set");
+  const configurable = !suite && workflowComponents[node.kind].settings === "scalar";
   const ports = portsFor(node.kind);
   const summary =
     suite && node.kind === "branch"
@@ -85,6 +87,20 @@ export function StepInspector({
           </button>
         )}
       </div>
+      {!suite && (
+        <details className={styles.componentDetails}>
+          <summary>
+            <T>Component details</T>
+          </summary>
+          <p>
+            <T>Input shape</T> · <code>{workflowComponents[node.kind].input}</code>
+          </p>
+          <p>
+            <T>Required access</T> ·{" "}
+            {componentAccess[workflowComponents[node.kind].permission].join(", ")}
+          </p>
+        </details>
+      )}
       {editing && !locked && (
         <div className={styles.settings}>
           <label>
