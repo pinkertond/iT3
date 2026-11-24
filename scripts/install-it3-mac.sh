@@ -46,7 +46,8 @@ if [ -e "$dest" ] || [ -L "$dest" ]; then
   [ ! -L "$dest" ] && [ "$(bundle_id "$dest")" = "com.pinkertond.it3" ] || {
     echo "Existing destination is a different app or a launcher shortcut: $dest" >&2; exit 1;
   }
-  if pgrep -f -x "$dest/Contents/MacOS/iT3" >/dev/null || lsof -t "$dest/Contents/MacOS/iT3" >/dev/null 2>&1; then
+  # macOS signature services can hold an idle bundle open through an ordinary file descriptor.
+  if pgrep -f -x "$dest/Contents/MacOS/iT3" >/dev/null || [ -n "$(lsof -t -a -d txt "$dest/Contents/MacOS/iT3" 2>/dev/null)" ]; then
     echo "Quit iT3 after active work finishes, then retry." >&2; exit 1
   fi
   backups="$HOME/Library/Application Support/iT3-install-backups"
