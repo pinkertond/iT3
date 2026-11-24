@@ -16056,6 +16056,33 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "message.dispatch": {
         const thread = yield* refuseNativeSubagentMessage(command);
+        if (command.projectSeatOnly) {
+          const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
+          const project = settings.it3Workspaces?.projects?.[thread.projectId];
+          const record = yield* projects.getShell(thread.projectId).pipe(mapDispatchError(command));
+          const route =
+            command.projectSeatRoute && project?.queuePolicy?.[command.projectSeatRoute];
+          const model = command.modelSelection;
+          if (
+            !model ||
+            model.instanceId !== thread.modelSelection.instanceId ||
+            model.model !== thread.modelSelection.model ||
+            (project?.queuePolicy &&
+              (!route || model.instanceId !== route.instanceId || model.model !== route.model)) ||
+            Option.isNone(record) ||
+            record.value.archivedAt ||
+            (project?.status ?? "active") !== "active" ||
+            project?.seats?.[command.projectSeatOnly] !== thread.id ||
+            thread.interactionMode !== "plan" ||
+            !["auto", "approval-required"].includes(thread.runtimeMode)
+          )
+            return yield* new OrchestratorCommandRejectedError({
+              commandId: command.commandId,
+              commandType: command.type,
+              cause:
+                "Project seat, project status or chat permissions changed. Choose an active project and a Plan chat with Auto or approval-required permissions.",
+            });
+        }
         if (command.reviewerOnly) {
           const settings = yield* serverSettings.getSettings.pipe(Effect.orDie);
           const record = yield* projects.getShell(thread.projectId).pipe(mapDispatchError(command));

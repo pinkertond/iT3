@@ -76,3 +76,7 @@ The fork owns the reviewer scheduler, SQLite mutations and queue reader in the s
 The host owns candidate creation, role transitions and settlement in `apps/server/src/it3/`. The optional `it3GuardedLoop` capability enables the UI only on compatible hosts. The only change to the shared thread projection is the pending-request timestamp used by the workspace inbox. Preserve the `intent` and `section` search parameters on the workspace route when rebasing. Verify the candidate and dispatch suites, the project-intent browser suite, and the project-home generator after an upstream merge.
 
 The first restricted adapter uses the host's default Claude CLI, a matching signed-in account and fresh tool-free sessions. Supporting another harness requires an equivalent write boundary, independent session identities, usage evidence and a working negative test for protected paths.
+
+## Project team routing
+
+Fork-owned seat admission, roster projections and UI live in the iT3 directories. Reapply the optional seat settings and capability, the focused queue-preview request, and the project seat guard on native message dispatch. That final guard rechecks project status, current occupant, chat permissions and model selection. Replay the Architect takeover integration test and the project roster browser tests after an upstream update.

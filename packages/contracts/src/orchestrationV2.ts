@@ -1,3 +1,4 @@
+import { ProjectTaskSeat } from "./it3Tasks.ts";
 import { OrchestrationMessageContext } from "./composerContext.ts";
 import { withRecordIdTable } from "./orchestrationV2IdTable.ts";
 import * as DateTime from "effect/DateTime";
@@ -3590,6 +3591,8 @@ export const OrchestrationV2Command = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("message.dispatch"),
+    projectSeatRoute: Schema.optionalKey(Schema.Literals(["economy", "advanced"])),
+    projectSeatOnly: Schema.optionalKey(ProjectTaskSeat),
     reviewerOnly: Schema.optionalKey(Schema.Literal(true)),
     notification: Schema.optional(OrchestrationV2Notification),
     /** Sends this pending guest message; the server uses the guest's text, not `text`. */

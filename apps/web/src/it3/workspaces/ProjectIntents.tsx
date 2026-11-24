@@ -30,11 +30,17 @@ export function projectDraft(intent: string | undefined) {
           "Describe the user interaction\nProduce a visual concept with its trade-offs\nSubmit the concept for human selection",
         compare: true,
       };
+    case "explore":
+      return {
+        steps:
+          "Locate the authoritative sources\nTrace the relevant system connections\nAnswer the question with evidence and open questions",
+        compare: false,
+      };
     case "architecture":
       return {
         steps:
-          "Trace the current design and constraints\nPropose the change with alternatives\nRecord the decision and implementation plan",
-        compare: false,
+          "Trace the current design and constraints\nDescribe this approach and its trade-offs\nSubmit the decision brief and implementation plan",
+        compare: true,
       };
     default:
       return null;
@@ -44,10 +50,12 @@ export function ProjectIntents({
   project,
   tasks,
   workflows,
+  roster = false,
 }: {
   project: Project;
   tasks: boolean;
   workflows: boolean;
+  roster?: boolean;
 }) {
   const gt = useGT();
   const [choice, select] = useState("");
@@ -121,6 +129,7 @@ export function ProjectIntents({
               ))}
             </>
           )}
+          {choice === "learn" && roster && draft("explore", gt("Ask Explorer"))}
           {choice === "architect" && (
             <>
               {draft("architecture", gt("Draft an architecture decision"))}

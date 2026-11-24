@@ -1,3 +1,5 @@
+import type { Directory } from "./directory";
+import { intentSeat, useSeatRoutes, specialist } from "./seatRoutes";
 import { projectDraft } from "./ProjectIntents";
 import { ActivityStatus } from "../shared/ActivityStatus";
 import * as Cause from "effect/Cause";
@@ -13,6 +15,9 @@ import { Link } from "@tanstack/react-router";
 import { T, useGT } from "gt-react";
 import {
   AuthOrchestrationOperateScope,
+  AuthDiagnosticsReadScope,
+  AuthOrchestrationReadScope,
+  type ProjectId,
   type TaskBrief,
   type TaskEdit,
   type TaskAttempt,
@@ -27,9 +32,12 @@ import type { Project } from "~/types";
 import { PageList } from "./PageList";
 import styles from "./workspaces.module.css";
 
+type Place = NonNullable<Directory["projects"]>[ProjectId];
 type Props = {
+  place?: Place | undefined;
   concept?: string | undefined;
   intent?: string | undefined;
+  rosterSupported?: boolean;
   guardedSupported?: boolean;
   reviewSupported?: boolean;
   queueSupported?: boolean;
@@ -42,6 +50,8 @@ type Props = {
   onSelect: (key?: string) => void;
 };
 export function TaskBoard({
+  place,
+  rosterSupported,
   guardedSupported,
   intent,
   concept,
@@ -55,8 +65,11 @@ export function TaskBoard({
   thread,
   onSelect,
 }: Props) {
+  const seatRoutes = useSeatRoutes();
   const gt = useGT();
   const draft = projectDraft(intent);
+  const role = rosterSupported ? intentSeat(intent) : undefined;
+  const bound = role && specialist(role) ? place?.seats?.[role] : null;
   const recordKey = selected ?? seed;
   const [offset, setOffset] = useState(0);
   const [creating, setCreating] = useState(!!seed || !!draft);
@@ -164,6 +177,7 @@ export function TaskBoard({
               requestId: randomUUID(),
               change: {
                 action: "create",
+                ...(role && specialist(role) ? { seat: role } : {}),
                 ...(concept && protectedTask ? { basedOn: concept } : {}),
                 ...(protectedTask ? { protectedImplementation: true as const } : {}),
                 title: title.trim(),
@@ -179,6 +193,18 @@ export function TaskBoard({
             });
           }}
         >
+          {role && (
+            <p>
+              <strong>{seatRoutes[role].name}</strong> ·{" "}
+              {bound
+                ? (threads.find((t) => t.id === bound)?.title ?? gt("Unavailable chat"))
+                : specialist(role)
+                  ? gt("Vacant")
+                  : gt("Per-turn agent")}
+              <br />
+              {seatRoutes[role].deliverable} → {seatRoutes[role].next}
+            </p>
+          )}
           {concept && (
             <p>
               <T>Selected design task</T> · {concept}
@@ -315,21 +341,26 @@ export function TaskBoard({
               <T>Open selected design</T> · {current.basedOn}
             </Link>
           )}
-          {current.accepted && current.comparison && guardedSupported && (
-            <Link
-              className={styles["iw-row"]}
-              to="/workspaces"
-              search={{
-                env: project.environmentId,
-                project: project.id,
-                view: "tasks",
-                intent: "implement",
-                concept: current.key,
-              }}
-            >
-              <T>Implement the selected concept</T> →
-            </Link>
-          )}
+          {current.accepted &&
+            (current.comparison || current.seat === "architect" || current.seat === "designer") &&
+            guardedSupported && (
+              <Link
+                className={styles["iw-row"]}
+                to="/workspaces"
+                search={{
+                  env: project.environmentId,
+                  project: project.id,
+                  view: "tasks",
+                  intent: "implement",
+                  concept: current.key,
+                }}
+              >
+                {current.seat === "architect"
+                  ? gt("Implement the selected approach")
+                  : gt("Implement the selected concept")}{" "}
+                →
+              </Link>
+            )}
           {queueSupported &&
             current.attempts[0] &&
             !current.attempts[0].guarded &&
@@ -338,7 +369,10 @@ export function TaskBoard({
                 protectionRequired={!!current.protectedImplementation}
                 guardedSupported={guardedSupported}
                 reviewSupported={
-                  reviewSupported && !current.comparison && !current.attempts[0]?.review
+                  reviewSupported &&
+                  !current.seat &&
+                  !current.comparison &&
+                  !current.attempts[0]?.review
                 }
                 key={JSON.stringify([current.key, current.attempts[0].revision])}
                 step={current.queueStep ?? null}
@@ -359,6 +393,7 @@ export function TaskBoard({
           <div className={styles["task-attempts"]}>
             {current.attempts.map((a) => (
               <Attempt
+                place={place}
                 key={a.number}
                 contributors={
                   query.data?.contributors
@@ -428,6 +463,7 @@ export function TaskBoard({
   );
 }
 function Attempt({
+  place,
   contributors,
   task,
   attempt: a,
@@ -436,6 +472,7 @@ function Attempt({
   disabled,
   write,
 }: {
+  place?: Place | undefined;
   contributors: readonly ThreadId[];
   task: TaskBrief;
   attempt: TaskAttempt;
@@ -444,6 +481,7 @@ function Attempt({
   disabled: boolean;
   write: (edit: TaskEdit) => Promise<void>;
 }) {
+  const seatRoutes = useSeatRoutes();
   const gt = useGT();
   const [usage, setUsage] = useState(false);
   const [target, setTarget] = useState("");
@@ -458,6 +496,40 @@ function Attempt({
       change: c,
     });
   const owner = threads.find((t) => t.id === a.owner);
+  const role =
+    task.seat ??
+    a.guarded?.role ??
+    (task.protectedImplementation || task.queueStep?.guarded ? "builder" : task.queueStep?.seat);
+  const bound = task.seat ? place?.seats?.[task.seat] : null;
+  const occupant = threads.find((t) => t.id === bound && !t.deletedAt && !t.archivedAt);
+  const diag = useEnvironmentScope(project.environmentId, AuthDiagnosticsReadScope),
+    read = useEnvironmentScope(project.environmentId, AuthOrchestrationReadScope);
+  const capacity = useEnvironmentQuery(
+    task.seat && !task.accepted && a.stage !== "submitted" && place?.queuePolicy && diag && read
+      ? serverEnvironment.it3QueuePreview({
+          environmentId: project.environmentId,
+          input: { offset: 0, focus: { projectId: project.id, key: task.key, attempt: a.number } },
+        })
+      : null,
+  );
+  const decision = capacity.data?.rows?.[0];
+  const seatHold = !task.seat
+    ? ""
+    : !occupant
+      ? gt("Bind a Plan chat to this seat in Project team.")
+      : occupant.interactionMode !== "plan" ||
+          !["auto", "approval-required"].includes(occupant.runtimeMode)
+        ? gt("Use Plan mode with Auto or approval-required permissions.")
+        : place?.status && place.status !== "active"
+          ? gt("Activate this project to route work.")
+          : occupant.hasPendingApprovals || occupant.hasPendingUserInput
+            ? gt("Answer the pending request in the seat chat.")
+            : place?.queuePolicy && (!task.queueStep || task.queueStep.route === "check")
+              ? gt("Set a paid queue step under the project budget.")
+              : decision && decision.reason !== "ready"
+                ? decision.detail
+                : null;
+
   return (
     <article className={styles["task-attempt"]}>
       <h3>
@@ -477,6 +549,60 @@ function Attempt({
         )}{" "}
         {a.model && " · " + a.model}
       </p>
+      {role && (
+        <section>
+          <strong>{seatRoutes[role].name}</strong>
+          <p>
+            {seatRoutes[role].deliverable} → {seatRoutes[role].next}
+          </p>
+          {task.seat && !task.accepted && a.stage !== "submitted" && (
+            <>
+              {seatHold && <p role="status">{seatHold}</p>}
+              {place?.queuePolicy && diag && read && (
+                <p>
+                  <small>
+                    {decision?.detail !== seatHold && decision?.detail}{" "}
+                    {decision && decision.remainingTokens !== null && (
+                      <>
+                        {decision.remainingTokens.toLocaleString()}{" "}
+                        <T>tokens after proposed turn</T>
+                      </>
+                    )}
+                  </small>
+                  <button onClick={capacity.refresh}>
+                    <T>Refresh capacity</T>
+                  </button>
+                </p>
+              )}
+              {!place?.queuePolicy && (
+                <small>
+                  <T>Manual dispatch. This project has no queue budget configured.</T>
+                </small>
+              )}
+              {occupant && a.owner !== bound && (
+                <button
+                  disabled={disabled || !!seatHold}
+                  onClick={() =>
+                    void change({
+                      action: "routeSeat",
+                      next: a.next || seatRoutes[role].deliverable,
+                    })
+                  }
+                >
+                  {a.hasClaimed ? gt("Transfer checkpoint to") : gt("Route attempt to")}{" "}
+                  {occupant.title}
+                </button>
+              )}
+              <Link
+                to="/workspaces"
+                search={{ env: project.environmentId, project: project.id, view: "agents" }}
+              >
+                <T>Project team</T>
+              </Link>
+            </>
+          )}
+        </section>
+      )}
       {(task.queueStep?.seat === "reviewer" || a.review) && (
         <section aria-label={gt("Reviewer dispatch")}>
           <strong>
@@ -530,6 +656,19 @@ function Attempt({
               git diff {a.guarded.base} {a.guarded.candidate}
             </code>
           </p>
+          {a.guarded.selectedDesign && (
+            <details>
+              <summary>
+                <T>Selected design in Builder’s packet</T>
+              </summary>
+              <p>
+                {a.guarded.selectedDesign.task} · {gt("Attempt")} {a.guarded.selectedDesign.attempt}
+              </p>
+              <p>{a.guarded.selectedDesign.summary}</p>
+              <p>{a.guarded.selectedDesign.verification}</p>
+              <p>{a.guarded.selectedDesign.reference}</p>
+            </details>
+          )}
           {a.guarded.contest && (
             <p>
               <strong>
@@ -717,7 +856,8 @@ function Attempt({
           · {a.verification}
         </p>
       )}
-      {!task.protectedImplementation &&
+      {!task.seat &&
+        !task.protectedImplementation &&
         !task.queueStep?.guarded &&
         !task.accepted &&
         a.stage !== "submitted" && (
@@ -765,11 +905,13 @@ function Attempt({
           <T>Retry delivery</T>
         </button>
       )}
-      {task.comparison && !task.accepted && task.attempts.every((x) => x.stage === "submitted") && (
-        <button disabled={disabled} onClick={() => void change({ action: "accept" })}>
-          <T>Accept this attempt</T>
-        </button>
-      )}
+      {(task.comparison || task.seat === "architect" || task.seat === "designer") &&
+        !task.accepted &&
+        task.attempts.every((x) => x.stage === "submitted") && (
+          <button disabled={disabled} onClick={() => void change({ action: "accept" })}>
+            <T>Accept this attempt</T>
+          </button>
+        )}
     </article>
   );
 }

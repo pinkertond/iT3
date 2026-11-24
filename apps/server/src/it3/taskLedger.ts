@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 // @effect-diagnostics globalDate:off -- SQLite commits record a wall-clock timestamp.
+import { projectSeatRoster } from "./seatRoster.ts";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
@@ -90,14 +91,23 @@ export function readTask(
   key?: string,
   offset = 0,
   thread?: ThreadId,
+  roster?: { seat?: Parameters<typeof projectSeatRoster>[2] },
 ) {
   return taskLedgerOperation((): TaskPage => {
-    const empty = { contributors: [], tasks: [], events: [], brief: null, more: false };
+    const empty = {
+      ...(roster ? { roster: { seats: [], assignments: [] } } : {}),
+      contributors: [],
+      tasks: [],
+      events: [],
+      brief: null,
+      more: false,
+    };
     if (!NodeFS.existsSync(NodePath.join(directory, "it3-tasks.sqlite"))) return empty;
     const db = openTaskLedger(directory, true);
     try {
       db.exec("BEGIN");
       if (db.prepare("PRAGMA user_version").get()?.user_version === 0) return empty;
+      if (roster) return { ...empty, ...projectSeatRoster(db, project, roster.seat, offset) };
       if (!key) {
         const rows = db
           .prepare(`SELECT key,json_extract(body,'$.title') title,
@@ -183,7 +193,19 @@ function validateFiles(files: readonly string[]) {
   )
     refuse("Use unique repository-relative file paths.");
 }
+export function taskWatermark(directory: string) {
+  return taskLedgerOperation(() => {
+    const db = openTaskLedger(directory, true);
+    try {
+      return Number(db.prepare("SELECT IFNULL(MAX(id),0) id FROM events").get()?.id);
+    } finally {
+      db.close();
+    }
+  });
+}
 export interface RecoveryEvidence {
+  capacityAt?: number;
+  seatRecipient?: ThreadId;
   baseline?: string | undefined;
   recovery?: TaskRecovery | undefined;
   destination?: string | null | undefined;
@@ -204,7 +226,7 @@ function reduce(
   if (c.action === "create") {
     if (
       actor.kind !== "operator" ||
-      (c.protectedImplementation && c.comparison) ||
+      (c.protectedImplementation && (c.comparison || !!c.seat)) ||
       current ||
       edit.attempt !== 1 ||
       edit.generation ||
@@ -212,6 +234,7 @@ function reduce(
     )
       refuse("Task already exists or this creation is invalid.");
     return {
+      ...(c.seat ? { seat: c.seat } : {}),
       ...(c.basedOn ? { basedOn: c.basedOn } : {}),
       ...(c.protectedImplementation ? { protectedImplementation: true as const } : {}),
       key: edit.key,
@@ -250,6 +273,7 @@ function reduce(
   )
     refuse("This protected task is owned by the guarded loop.");
   let a = { ...old, revision: old.revision + 1, updated: at };
+  delete a.seatHold;
   let accepted: number | null = null;
   switch (c.action) {
     case "verifyCandidate": {
@@ -271,6 +295,7 @@ function reduce(
       break;
     }
     case "plan": {
+      if (task.seat && c.step?.seat) refuse("A specialist task routes to its named seat.");
       if (c.step?.guarded) {
         if (c.step.seat !== "reviewer" || !c.step.estimatedUsd)
           refuse("A protected loop requires a paid seat and a positive per-turn USD limit.");
@@ -300,20 +325,27 @@ function reduce(
         refuse("Only a working attempt can be inspected.");
       a.recovery = evidence.recovery;
       break;
-    case "handoff":
+    case "routeSeat":
+    case "handoff": {
+      if (task.seat && c.action === "handoff") refuse("Route this task to the bound project seat.");
+      const target =
+        c.action === "handoff"
+          ? c.target
+          : (task.seat && evidence.seatRecipient) ||
+            refuse("Resolve the project seat before routing.");
       if (actor.kind !== "operator" || old.stage === "submitted")
         refuse("This attempt cannot be reassigned.");
       if (
         task.comparison &&
-        task.attempts.some((other) => other.number !== a.number && other.owner === c.target)
+        task.attempts.some((other) => other.number !== a.number && other.owner === target)
       )
         refuse("Choose a separate receiving conversation for each attempt.");
       a = {
         ...a,
         ...(evidence.recovery ? { recovery: evidence.recovery } : {}),
         ...(evidence.destination !== undefined ? { worktree: evidence.destination } : {}),
-        owner: c.target,
-        ownerTitle: c.target,
+        owner: target,
+        ownerTitle: target,
         model: "",
         generation: old.generation + 1,
         stage: "assigned",
@@ -321,7 +353,9 @@ function reduce(
         next: c.next,
       };
       break;
+    }
     case "claim": {
+      if (task.seat && old.stage === "ready") refuse("This task must first be routed to its seat.");
       if (task.queueStep?.seat && old.stage === "ready" && !old.review)
         refuse("This attempt is queued for the project reviewer.");
 
@@ -386,7 +420,8 @@ function reduce(
           next: "",
           verification: c.verification,
         };
-        if (!task.comparison) accepted = a.number;
+        if (!task.comparison && task.seat !== "architect" && task.seat !== "designer")
+          accepted = a.number;
       }
       break;
     case "notify":
@@ -397,7 +432,7 @@ function reduce(
     case "accept":
       if (
         actor.kind !== "operator" ||
-        !task.comparison ||
+        (!task.comparison && task.seat !== "architect" && task.seat !== "designer") ||
         !task.attempts.every((x) => x.stage === "submitted")
       )
         refuse("Both results must be submitted before comparison.");
@@ -437,6 +472,12 @@ export function writeTask(
         if (seen.input !== input || !current) refuse("Request ID already used for another change.");
         return current;
       }
+      if (
+        evidence.capacityAt !== undefined &&
+        evidence.capacityAt !==
+          Number(db.prepare("SELECT IFNULL(MAX(id),0) id FROM events").get()?.id)
+      )
+        refuse("Project work changed during admission. Refresh and route the attempt again.");
       if (edit.change.action === "create" && edit.change.basedOn) {
         const source = lookup(db, project, edit.change.basedOn);
         if (!source?.accepted || !edit.change.protectedImplementation)
@@ -450,19 +491,21 @@ export function writeTask(
           ? (c.step?.next ?? "Removed queue step")
           : c.action === "create"
             ? c.title
-            : c.action === "handoff"
-              ? c.target + " · " + c.next
-              : c.action === "claim"
-                ? c.next
-                : c.action === "inspect"
-                  ? "Inspected working files and previous turn"
-                  : c.action === "accept"
-                    ? "Accepted result"
-                    : c.action === "notify"
-                      ? "Queued in the receiving chat"
-                      : c.action === "verifyCandidate"
-                        ? c.commit + " · " + c.evidence
-                        : c.checkpoint;
+            : c.action === "routeSeat"
+              ? result.seat + " → " + result.attempts[edit.attempt - 1]?.owner + " · " + c.next
+              : c.action === "handoff"
+                ? c.target + " · " + c.next
+                : c.action === "claim"
+                  ? c.next
+                  : c.action === "inspect"
+                    ? "Inspected working files and previous turn"
+                    : c.action === "accept"
+                      ? "Accepted result"
+                      : c.action === "notify"
+                        ? "Queued in the receiving chat"
+                        : c.action === "verifyCandidate"
+                          ? c.commit + " · " + c.evidence
+                          : c.checkpoint;
       const detail =
         c.action === "checkpoint"
           ? [
@@ -528,7 +571,8 @@ export function readQueueAttempts(directory: string) {
       const rows = db
         .prepare(`SELECT t.project,t.key,json_extract(t.body,'$.title') title,
         COALESCE(NULLIF(a.value ->> '$.reviewHold',''),a.value ->> '$.review.detail') review_state,
-        CASE WHEN length(a.value ->> '$.reviewHold')>0 THEN a.value ->> '$.reviewHold'
+        CASE WHEN length(a.value->>'$.seatHold')>0 THEN 'Last routing hold · '||(a.value->>'$.seatHold') WHEN a.value->>'$.stage'='submitted' AND t.body->>'$.seat' IN ('architect','designer') THEN 'Select the result to send to Builder.'
+          WHEN length(a.value ->> '$.reviewHold')>0 THEN a.value ->> '$.reviewHold'
           WHEN a.value ->> '$.review.finished' IS NOT NULL AND a.value ->> '$.stage'='ready' THEN COALESCE(NULLIF(a.value ->> '$.checkpoint',''),a.value ->> '$.review.detail') END attention,
         a.value ->> '$.updated' updated,
         json_extract(t.body,'$.queueStep') step,a.value ->> '$.number' attempt,a.value ->> '$.stage' stage,
@@ -540,7 +584,8 @@ export function readQueueAttempts(directory: string) {
           WHERE json_extract(parent.body,'$.accepted') IS NULL LIMIT 1) blocked
         FROM tasks t JOIN events e ON e.project=t.project AND e.key=t.key AND e.action='create'
         JOIN json_each(t.body,'$.attempts') a
-        WHERE json_extract(t.body,'$.accepted') IS NULL AND a.value ->> '$.stage' != 'submitted'`)
+        WHERE json_extract(t.body,'$.accepted') IS NULL AND (a.value ->> '$.stage' != 'submitted' OR
+        (t.body->>'$.seat' IN ('architect','designer') AND a.value->>'$.number'=1 AND NOT EXISTS(SELECT 1 FROM json_each(t.body,'$.attempts') other WHERE other.value->>'$.stage'!='submitted')))`)
         .all();
       return rows.map((r) => ({
         projectId: ProjectId.make(String(r.project)),
@@ -584,6 +629,48 @@ export function readGuardedSpend(directory: string, day: string) {
           estimated: !!r.estimated,
         });
       return spend;
+    } finally {
+      db.close();
+    }
+  });
+}
+
+export function noteSeatHold(
+  directory: string,
+  project: string,
+  edit: TaskEdit,
+  operator: string,
+  detail: string,
+) {
+  return taskLedgerOperation(() => {
+    const db = openTaskLedger(directory);
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      const task = lookup(db, project, edit.key);
+      const attempt = task?.attempts.find((a) => a.number === edit.attempt);
+      if (
+        !task?.seat ||
+        task.accepted !== null ||
+        !attempt ||
+        attempt.stage === "submitted" ||
+        attempt.revision !== edit.revision ||
+        attempt.generation !== edit.generation ||
+        attempt.seatHold === detail
+      )
+        return;
+      const at = new Date().toISOString();
+      const attempts = task.attempts.map((a) =>
+        a !== attempt ? a : { ...a, seatHold: detail, updated: at },
+      );
+      db.prepare("UPDATE tasks SET body=? WHERE project=? AND key=?").run(
+        JSON.stringify({ ...task, attempts }),
+        project,
+        edit.key,
+      );
+      db.prepare(
+        "INSERT INTO events(project,key,attempt,actor,identity,request_id,input,action,at,detail) VALUES(?,?,?,'Seat router',?,lower(hex(randomblob(16))),'{}','seatHold',?,?)",
+      ).run(project, edit.key, edit.attempt, "router/" + operator, at, detail);
+      db.exec("COMMIT");
     } finally {
       db.close();
     }

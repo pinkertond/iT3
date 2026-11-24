@@ -2,6 +2,16 @@ import { QueueStep } from "./it3Queue.ts";
 import * as Schema from "effect/Schema";
 import { NonNegativeInt, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
+export const ProjectTaskSeat = Schema.Literals(["architect", "designer", "explorer"]);
+export type ProjectTaskSeat = typeof ProjectTaskSeat.Type;
+const RosterSeat = Schema.Literals([
+  "architect",
+  "designer",
+  "explorer",
+  "builder",
+  "reviewer",
+  "test-maintainer",
+]);
 const short = TrimmedNonEmptyString.check(Schema.isMaxLength(160));
 const key = short.check(Schema.isPattern(/^[\p{L}\p{N}][\p{L}\p{N}._:/-]*$/u));
 const note = TrimmedNonEmptyString.check(Schema.isMaxLength(4000));
@@ -21,6 +31,7 @@ export const TaskRecovery = Schema.Struct({
 });
 export type TaskRecovery = typeof TaskRecovery.Type;
 const ReviewReceipt = Schema.Struct({
+  role: Schema.optionalKey(Schema.Literals(["builder", "reviewer", "test-maintainer"])),
   id: Schema.String,
   thread: ThreadId,
   pool: Schema.String,
@@ -44,8 +55,18 @@ const ReviewReceipt = Schema.Struct({
 });
 export type ReviewReceipt = typeof ReviewReceipt.Type;
 export const TaskAttempt = Schema.Struct({
+  seatHold: Schema.optionalKey(Schema.String),
   guarded: Schema.optionalKey(
     Schema.Struct({
+      selectedDesign: Schema.optionalKey(
+        Schema.Struct({
+          task: key,
+          attempt: Schema.Number,
+          summary: Schema.String,
+          verification: Schema.String,
+          reference: Schema.String,
+        }),
+      ),
       base: Schema.String,
       candidate: Schema.String,
       role: Schema.Literals(["builder", "reviewer", "test-maintainer"]),
@@ -81,6 +102,7 @@ export const TaskAttempt = Schema.Struct({
 export type TaskAttempt = typeof TaskAttempt.Type;
 export const TaskBrief = Schema.Struct({
   basedOn: Schema.optionalKey(key),
+  seat: Schema.optionalKey(ProjectTaskSeat),
   protectedImplementation: Schema.optionalKey(Schema.Literal(true)),
   queueStep: Schema.optionalKey(QueueStep),
   key,
@@ -108,6 +130,7 @@ const TaskAction = Schema.Union([
   Schema.Struct({
     action: Schema.Literal("create"),
     basedOn: Schema.optionalKey(key),
+    seat: Schema.optionalKey(ProjectTaskSeat),
     protectedImplementation: Schema.optionalKey(Schema.Literal(true)),
     title: short,
     request: note,
@@ -115,6 +138,7 @@ const TaskAction = Schema.Union([
     comparison: Schema.Boolean,
     steps,
   }),
+  Schema.Struct({ action: Schema.Literal("routeSeat"), next: note }),
   Schema.Struct({ action: Schema.Literal("handoff"), target: ThreadId, next: note }),
   Schema.Struct({ action: Schema.Literal("inspect") }),
   Schema.Struct({ action: Schema.Literal("plan"), step: Schema.NullOr(QueueStep) }),
@@ -137,12 +161,65 @@ export const TaskWorkerEdit = Schema.Struct({
 });
 export type TaskEdit = typeof TaskEdit.Type;
 export const TaskRead = Schema.Struct({
+  roster: Schema.optionalKey(Schema.Literal(true)),
+  rosterSeat: Schema.optionalKey(RosterSeat),
   projectId: ProjectId,
   threadId: Schema.optionalKey(ThreadId),
   key: Schema.optionalKey(key),
   offset: Schema.optionalKey(NonNegativeInt),
 });
 export const TaskPage = Schema.Struct({
+  roster: Schema.optionalKey(
+    Schema.Struct({
+      receipts: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            seat: RosterSeat,
+            turns: NonNegativeInt,
+            usd: Schema.NullOr(Schema.Number),
+            tokens: Schema.NullOr(NonNegativeInt),
+            unknown: NonNegativeInt,
+          }),
+        ),
+      ),
+      history: Schema.optionalKey(
+        Schema.Array(
+          Schema.Struct({
+            id: Schema.optionalKey(NonNegativeInt),
+            key,
+            at: Schema.String,
+            action: Schema.String,
+            detail: Schema.String,
+          }),
+        ),
+      ),
+      seats: Schema.Array(
+        Schema.Struct({
+          seat: RosterSeat,
+          active: NonNegativeInt,
+          first: Schema.String,
+          decisions: NonNegativeInt,
+          running: NonNegativeInt,
+        }),
+      ),
+      assignments: Schema.Array(
+        Schema.Struct({
+          seat: RosterSeat,
+          key: Schema.String,
+          title: Schema.String,
+          attempt: Schema.Number,
+          stage: Schema.String,
+          owner: Schema.NullOr(ThreadId),
+          expected: Schema.String,
+          next: Schema.String,
+          hold: Schema.String,
+          decision: Schema.Boolean,
+          accepted: Schema.Boolean,
+          updated: Schema.String,
+        }),
+      ),
+    }),
+  ),
   contributors: Schema.Array(Schema.Struct({ attempt: Schema.Number, threadId: ThreadId })),
   tasks: Schema.Array(
     Schema.Struct({ key, title: short, stage: Schema.String, owner: Schema.String }),

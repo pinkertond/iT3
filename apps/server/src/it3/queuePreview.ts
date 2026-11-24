@@ -357,3 +357,20 @@ export function previewQueue(input: PreviewInput, limit = 12) {
     rows: decisions.slice(input.offset, input.offset + limit).map((d) => d.row),
   };
 }
+
+export function previewSeat(
+  queue: PreviewInput,
+  focus: { projectId: ProjectId; key: string; attempt: number },
+) {
+  const matches = (a: { projectId: ProjectId; key: string; attempt: number }) =>
+    a.projectId === focus.projectId && a.key === focus.key && a.attempt === focus.attempt;
+  const attempts = queue.attempts.map((a) => (matches(a) ? { ...a, stage: "ready" } : a));
+  const preview = previewQueue({ ...queue, offset: 0, attempts }, attempts.length);
+  const rows = preview.rows.filter(matches);
+  return {
+    ...preview,
+    rows,
+    total: rows.length,
+    eligible: rows.filter((r) => r.reason === "ready").length,
+  };
+}

@@ -7,6 +7,7 @@ import {
   type ThreadId,
   type ProjectId,
   type OrchestrationV2ThreadShell,
+  type ProjectTaskSeat,
   type TaskWrite,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -14,7 +15,7 @@ import * as Option from "effect/Option";
 import type { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
 
 import { observeTurn, type SourceShell, type TaskCheckouts } from "./taskRecovery.ts";
-import { type RecoveryEvidence, readTask, writeTask } from "./taskLedger.ts";
+import { type RecoveryEvidence, readTask, noteSeatHold, writeTask } from "./taskLedger.ts";
 
 export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
   ReadError,
@@ -32,7 +33,8 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
           OrchestrationV2ThreadShell,
           "projectId" | "archivedAt" | "deletedAt" | "worktreePath"
         > &
-          SourceShell)
+          SourceShell &
+          Partial<Pick<OrchestrationV2ThreadShell, "modelSelection">>)
       | null,
       ReadError
     >;
@@ -46,6 +48,8 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
     ) => Effect.Effect<Option.Option<{ workspaceRoot: string }>, ProjectError>;
   },
   checkouts: TaskCheckouts,
+  resolveSeat?: (seat: ProjectTaskSeat) => Effect.Effect<ThreadId | null, TaskLedgerError>,
+  checkSeatCapacity?: (shell: ThreadId) => Effect.Effect<number | void, TaskLedgerError>,
 ) {
   const { projectId, edit } = input;
   const actor = { kind: "operator" as const, id: operator };
@@ -54,11 +58,8 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
     .pipe(Effect.mapError(() => new TaskLedgerError({ detail: "Could not read this project." })));
   if (Option.isNone(project))
     return yield* new TaskLedgerError({ detail: "Project does not exist." });
-  if (
-    edit.change.action !== "handoff" &&
-    edit.change.action !== "notify" &&
-    edit.change.action !== "inspect"
-  )
+  const assigning = edit.change.action === "handoff" || edit.change.action === "routeSeat";
+  if (!assigning && edit.change.action !== "notify" && edit.change.action !== "inspect")
     return yield* writeTask(directory, projectId, edit, actor);
   const before = yield* readTask(directory, projectId, edit.key);
   const slot = before.brief?.attempts.find((a) => a.number === edit.attempt);
@@ -108,7 +109,21 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
     evidence.recovery = yield* inspect(slot, slot.owner);
     return yield* persist();
   }
-  const target = edit.change.action === "handoff" ? edit.change.target : slot?.owner;
+  const seat = before.brief?.seat;
+  const bound = seat && resolveSeat ? yield* resolveSeat(seat) : null;
+  if (seat && (!bound || (edit.change.action === "notify" && bound !== slot?.owner)))
+    return yield* new TaskLedgerError({
+      detail: "Bind an available occupant to the " + seat + " seat and route this attempt.",
+    });
+  if (seat && edit.change.action === "handoff")
+    return yield* new TaskLedgerError({ detail: "Route this task to its named seat." });
+  const target =
+    edit.change.action === "routeSeat"
+      ? bound
+      : edit.change.action === "handoff"
+        ? edit.change.target
+        : slot?.owner;
+  if (edit.change.action === "routeSeat" && target) evidence.seatRecipient = target;
   if (!target) return yield* new TaskLedgerError({ detail: "Choose a receiving chat." });
   const shell = yield* threads
     .getThreadShell(target)
@@ -117,6 +132,15 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
     );
   if (!shell || shell.projectId !== projectId || shell.archivedAt || shell.deletedAt)
     return yield* new TaskLedgerError({ detail: "Choose an available chat in this project." });
+  if (seat && checkSeatCapacity) {
+    const watermark = yield* checkSeatCapacity(target).pipe(
+      Effect.tapError((e) =>
+        noteSeatHold(directory, projectId, edit, operator, e.detail).pipe(Effect.ignore),
+      ),
+    );
+    if (typeof watermark === "number") evidence.capacityAt = watermark;
+  }
+  if (seat && assigning) evidence.destination = shell.worktreePath;
   if (
     before.brief?.comparison &&
     (!shell.worktreePath ||
@@ -132,7 +156,7 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
   if (
     slot &&
     (slot.hasClaimed || slot.stage === "assigned") &&
-    edit.change.action === "handoff" &&
+    assigning &&
     slot.revision === edit.revision &&
     slot.generation === edit.generation
   ) {
@@ -147,15 +171,19 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
         detail: "Choose a fresh recovery worktree to redirect a pending assignment.",
       });
     const recovery = yield* inspect(slot, slot.owner);
-    if (slot.worktree === shell.worktreePath) {
-      if (recovery.observed !== "stopped") {
-        if (recovery.snapshot) yield* checkouts.release(slot.worktree ?? root, recovery.snapshot);
-        return yield* new TaskLedgerError({
-          detail:
-            "The previous turn has not confirmed a stop. Stop it in its chat or use a separate recovery worktree.",
-        });
-      }
-    } else {
+    if (
+      recovery.observed !== "stopped" &&
+      (slot.worktree === shell.worktreePath || evidence.capacityAt !== undefined)
+    ) {
+      if (recovery.snapshot) yield* checkouts.release(slot.worktree ?? root, recovery.snapshot);
+      return yield* new TaskLedgerError({
+        detail:
+          evidence.capacityAt !== undefined
+            ? "Stop the previous turn before transferring its reserved capacity."
+            : "The previous turn has not confirmed a stop. Stop it in its chat or use a separate recovery worktree.",
+      });
+    }
+    if (slot.worktree !== shell.worktreePath) {
       const destination = shell.worktreePath;
       if (
         !destination ||
@@ -177,9 +205,10 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
     }
     evidence.recovery = recovery;
   }
-  const saved = edit.change.action === "handoff" ? yield* persist() : before.brief!;
+
+  const saved = assigning ? yield* persist() : before.brief!;
   const a = saved.attempts.find((x) => x.number === edit.attempt)!;
-  const generation = edit.generation + (edit.change.action === "handoff" ? 1 : 0);
+  const generation = edit.generation + (assigning ? 1 : 0);
   if (
     a.generation !== generation ||
     a.owner !== target ||
@@ -203,6 +232,15 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
   yield* threads
     .sendToThread({
       projectId,
+      ...(seat
+        ? {
+            projectSeatOnly: seat,
+            ...(shell.modelSelection ? { modelSelection: shell.modelSelection } : {}),
+            ...(saved.queueStep && saved.queueStep.route !== "check"
+              ? { projectSeatRoute: saved.queueStep.route }
+              : {}),
+          }
+        : {}),
       commandId: CommandId.make("it3-task-" + receipt),
       threadId: target,
       messageId: MessageId.make("it3-task-" + receipt),

@@ -17,7 +17,11 @@ export const makeQueueReader = Effect.gen(function* () {
     serverSettings = yield* ServerSettings.ServerSettingsService,
     usage = yield* UsageService.UsageService,
     sql = yield* SqlClient.SqlClient;
-  return Effect.fn("it3.queue.read")(function* (offset = 0, reviewerOnly = false) {
+  return Effect.fn("it3.queue.read")(function* (
+    offset = 0,
+    reviewerOnly = false,
+    inspectProject?: import("@t3tools/contracts").ProjectId,
+  ) {
     const settings = yield* serverSettings.getSettings.pipe(
       Effect.mapError(() => new TaskLedgerError({ detail: "Could not read queue policy." })),
     );
@@ -42,6 +46,7 @@ export const makeQueueReader = Effect.gen(function* () {
         )
         .map((a) => a.projectId),
     );
+    if (inspectProject) paidProjects.add(inspectProject);
     const reports = yield* Effect.forEach(
       activeQueueProjects(projects, settings).filter(
         (p) => paidProjects.has(p.id) && settings.it3Workspaces?.projects?.[p.id]?.queuePolicy,

@@ -3,7 +3,8 @@ import { taskCheckouts } from "./it3/taskRecovery.ts";
 import { CheckpointStore } from "./checkpointing/CheckpointStore.ts";
 import { handleTaskWrite } from "./it3/taskHandoff.ts";
 import { makeQueueReader } from "./it3/queueReader.ts";
-import { previewQueue } from "./it3/queuePreview.ts";
+import { previewQueue, previewSeat } from "./it3/queuePreview.ts";
+import { makeSeatAdmission } from "./it3/seatAdmission.ts";
 import { readTask } from "./it3/taskLedger.ts";
 import { readProjectUsageOwners } from "./it3/projectUsage.ts";
 import { GitCommandError, OrchestrationDispatchCommandError } from "@t3tools/contracts";
@@ -1587,6 +1588,12 @@ export const layerWsRpc = (
       const storageCleanup = yield* StorageCleanup.StorageCleanup;
       const databaseStorage = yield* DatabaseStorage.DatabaseStorage;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const seatAdmission = makeSeatAdmission(
+        config.stateDir,
+        serverSettings.getSettings,
+        threadManagement.getThreadShell,
+        readQueueInput,
+      );
       const secretResolver = yield* SecretResolver.SecretResolver;
       const peerLinks = yield* PeerLinks.PeerLinks;
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
@@ -2847,11 +2854,19 @@ export const layerWsRpc = (
           processResourceMonitor.readHistory(input),
         [WS_METHODS.serverGetResourceTelemetryHistory]: (input) =>
           resourceTelemetry.readHistory(input),
-        [WS_METHODS.it3QueuePreview]: Effect.fn("it3.queuePreview")(function* ({ offset }) {
-          return previewQueue(yield* readQueueInput(offset));
+        [WS_METHODS.it3QueuePreview]: Effect.fn("it3.queuePreview")(function* ({ offset, focus }) {
+          const input = yield* readQueueInput(offset, false, focus?.projectId);
+          return focus ? previewSeat(input, focus) : previewQueue(input);
         }),
         [WS_METHODS.it3ReadTasks]: (input) =>
-          readTask(config.stateDir, input.projectId, input.key, input.offset, input.threadId),
+          readTask(
+            config.stateDir,
+            input.projectId,
+            input.key,
+            input.offset,
+            input.threadId,
+            input.roster ? { seat: input.rosterSeat } : undefined,
+          ),
         [WS_METHODS.it3WriteTask]: (input) =>
           handleTaskWrite(
             config.stateDir,
@@ -2860,6 +2875,8 @@ export const layerWsRpc = (
             threadManagement,
             projectService,
             it3Checkouts,
+            (seat) => seatAdmission.resolve(input.projectId, seat),
+            (thread) => seatAdmission.check(input, thread),
           ),
         [WS_METHODS.serverGetUsageSummary]: (input) =>
           input.it3ProjectId === undefined

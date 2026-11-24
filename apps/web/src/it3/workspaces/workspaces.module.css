@@ -342,3 +342,45 @@
   text-underline-offset: 0.2em;
   text-decoration: underline;
 }
+
+.seat-roster {
+  margin-block: 1.2rem;
+  container-type: inline-size;
+}
+.seat-card {
+  border-bottom: 1px solid var(--border);
+  padding: 0.35rem 0;
+}
+.seat-heading {
+  display: grid;
+  grid-template-columns: auto 1fr minmax(4rem, 36%);
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.35rem 0.1rem;
+  text-align: left;
+}
+.seat-heading > span:last-child {
+  text-align: right;
+}
+.seat-roster small {
+  display: block;
+  font-size: 0.77rem;
+  color: var(--muted-foreground);
+}
+.seat-card > p,
+.seat-detail {
+  margin: 0.3rem 0.15rem 0.5rem 1.4rem;
+}
+.seat-detail {
+  display: grid;
+  gap: 0.6rem;
+}
+.seat-detail a {
+  text-decoration: underline;
+  text-underline-offset: 0.18rem;
+}
+.seat-detail select {
+  display: block;
+  width: 100%;
+}

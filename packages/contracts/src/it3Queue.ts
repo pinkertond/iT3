@@ -91,6 +91,11 @@ const Decision = Schema.Struct({
   detail: Schema.String,
 });
 export type QueueDecision = typeof Decision.Type;
+export const SeatQueueFocus = Schema.Struct({
+  projectId: ProjectId,
+  key: TrimmedNonEmptyString,
+  attempt: Schema.Literals([1, 2]),
+});
 export const QueuePreview = Schema.Struct({
   guardedSpend: Schema.optionalKey(
     Schema.Array(

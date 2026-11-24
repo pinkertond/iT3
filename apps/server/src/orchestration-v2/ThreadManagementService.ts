@@ -151,6 +151,8 @@ export type ThreadManagementTerminalRunStatus = Extract<
 >;
 
 export interface ThreadManagementSendInput {
+  readonly projectSeatRoute?: "economy" | "advanced";
+  readonly projectSeatOnly?: import("@t3tools/contracts").ProjectTaskSeat;
   readonly reviewerOnly?: true;
   readonly projectId: ProjectId;
   readonly commandId: CommandId;
@@ -970,6 +972,8 @@ const make = Effect.gen(function* () {
 
     const dispatched = yield* dispatch({
       type: "message.dispatch",
+      ...(input.projectSeatRoute ? { projectSeatRoute: input.projectSeatRoute } : {}),
+      ...(input.projectSeatOnly ? { projectSeatOnly: input.projectSeatOnly } : {}),
       ...(input.reviewerOnly ? { reviewerOnly: true as const } : {}),
       commandId: input.commandId,
       threadId: input.threadId,

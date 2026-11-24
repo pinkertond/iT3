@@ -282,6 +282,7 @@ export const make = Effect.gen(function* () {
       it3WorkflowCanvas: true,
       it3ComposableWorkflows: true,
       it3WorkflowSubflows: true,
+      it3TeamRoster: true,
       it3GuardedLoop: true,
       it3ReviewerDispatch: true,
       it3QueuePreview: true,

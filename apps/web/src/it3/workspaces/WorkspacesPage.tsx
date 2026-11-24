@@ -1,3 +1,4 @@
+import { ProjectRoster } from "./ProjectRoster";
 import { QueuePreview } from "./QueuePreview";
 import { NeedsYou } from "./NeedsYou";
 import { ProjectIntents } from "./ProjectIntents";
@@ -407,6 +408,8 @@ function ProjectHome({
     : tree.roots.length === 1
       ? tree.roots[0]
       : undefined;
+  const rosterSupported =
+    useServerConfigs().get(p.environmentId)?.environment.capabilities.it3TeamRoster === true;
   const guardedSupported =
     useServerConfigs().get(p.environmentId)?.environment.capabilities.it3GuardedLoop === true;
   const canvasSupported =
@@ -491,7 +494,15 @@ function ProjectHome({
         {machine} · {p.workspaceRoot}
       </p>
       {view === "agents" && (
-        <ProjectIntents project={p} tasks={taskSupported} workflows={canvasSupported} />
+        <>
+          <ProjectIntents
+            project={p}
+            tasks={taskSupported}
+            workflows={canvasSupported}
+            roster={rosterSupported}
+          />
+          {rosterSupported && <ProjectRoster project={p} threads={threads} />}
+        </>
       )}
       <div className={styles["iw-filters"]}>
         <label>
@@ -568,11 +579,13 @@ function ProjectHome({
       {view === "tasks" ? (
         taskSupported ? (
           <TaskBoard
+            place={config}
             key={JSON.stringify([query.task, query.assign, query.intent, query.concept])}
             intent={query.intent}
             concept={query.concept}
             project={p}
             threads={threads}
+            rosterSupported={rosterSupported}
             guardedSupported={guardedSupported}
             reviewSupported={reviewSupported}
             queueSupported={queueSupported}

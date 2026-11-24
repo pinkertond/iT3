@@ -464,8 +464,11 @@ export const reviewerTick = Effect.fn("it3.review.tick")(function* ({
             : undefined;
         const packet = yield* Effect.try({
           try: () => {
-            const current = state ?? initialGuard(root!);
-            const text = guardedPrompt(root!, j.task, current, concept);
+            const current = state ?? {
+              ...initialGuard(root!),
+              ...(concept ? { selectedDesign: concept } : {}),
+            };
+            const text = guardedPrompt(root!, j.task, current, current.selectedDesign ?? concept);
             if (Buffer.byteLength(text) > step.inputTokens)
               throw Error(
                 "Increase the input estimate or narrow the selected files. The packet exceeds the conservative input allowance.",
@@ -561,6 +564,7 @@ export const reviewerTick = Effect.fn("it3.review.tick")(function* ({
         const running: ReviewReceipt = {
           ...receipt,
           phase: "running",
+          role: state.role,
           detail: "Running protected " + state.role,
         };
         const claimed = yield* save(

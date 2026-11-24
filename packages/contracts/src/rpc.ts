@@ -1,3 +1,4 @@
+import { SeatQueueFocus } from "./it3Queue.ts";
 import { QueuePreview } from "./it3Queue.ts";
 import { TaskRead, TaskWrite, TaskPage, TaskBrief, TaskLedgerError } from "./it3Tasks.ts";
 import {
@@ -1178,7 +1179,7 @@ const WsServerPrepareTriageRpc = Rpc.make(WS_METHODS.serverPrepareTriage, {
 });
 
 const It3QueuePreviewRpc = Rpc.make(WS_METHODS.it3QueuePreview, {
-  payload: Schema.Struct({ offset: NonNegativeInt }),
+  payload: Schema.Struct({ offset: NonNegativeInt, focus: Schema.optionalKey(SeatQueueFocus) }),
   success: QueuePreview,
   error: Schema.Union([EnvironmentAuthorizationError, TaskLedgerError]),
 });

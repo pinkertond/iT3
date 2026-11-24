@@ -1,3 +1,4 @@
+import { ProjectRoster } from "./ProjectRoster";
 import { ProjectIntents } from "./ProjectIntents";
 import { ActivityStatus } from "../shared/ActivityStatus";
 import { resolveRuntimeModeOption } from "~/components/chat/runtimeModeConfig";
@@ -138,15 +139,22 @@ function Roster({ selected: t }: { selected: EnvironmentThreadShell }) {
             </Link>
           </nav>
           {project &&
-            configs.get(t.environmentId)?.settings.it3Workspaces?.projects?.[t.projectId]
-              ?.managerThreadId === t.id && (
-              <ProjectIntents
-                project={project}
-                tasks={!!configs.get(t.environmentId)?.environment.capabilities.it3Tasks}
-                workflows={
-                  !!configs.get(t.environmentId)?.environment.capabilities.it3WorkflowCanvas
-                }
-              />
+            (configs.get(t.environmentId)?.settings.it3Workspaces?.projects?.[t.projectId]
+              ?.managerThreadId ?? (tree.roots.length === 1 ? tree.roots[0]?.id : null)) ===
+              t.id && (
+              <>
+                <ProjectIntents
+                  roster={!!configs.get(t.environmentId)?.environment.capabilities.it3TeamRoster}
+                  project={project}
+                  tasks={!!configs.get(t.environmentId)?.environment.capabilities.it3Tasks}
+                  workflows={
+                    !!configs.get(t.environmentId)?.environment.capabilities.it3WorkflowCanvas
+                  }
+                />
+                {configs.get(t.environmentId)?.environment.capabilities.it3TeamRoster && (
+                  <ProjectRoster project={project} threads={threads} />
+                )}
+              </>
             )}
           <h2>{t.title}</h2>
           <p>
