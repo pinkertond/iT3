@@ -1,5 +1,6 @@
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import { Outlet, useSearch, createFileRoute, redirect } from "@tanstack/react-router";
 
+import { AgentPanel } from "../it3/workspaces/AgentPanel";
 import { ThreadRouteView } from "../components/ThreadRouteView";
 import { GlobalVoiceInputIndicator } from "../components/chat/GlobalVoiceInputIndicator";
 import { isAppModalPage } from "../components/sidebar/mainAppLocation";
@@ -12,6 +13,7 @@ import { useShownThreadRouteTarget } from "../hooks/useShownThreadRouteTarget";
 function ChatRouteLayout() {
   // Render both routes here so draft promotion keeps the same ChatView mounted.
   const { shownTarget, modalOpen } = useShownThreadRouteTarget();
+  const team = useSearch({ strict: false, select: (s) => s.team === true });
   return (
     <>
       {shownTarget?.kind === "server" && !modalOpen ? (
@@ -23,6 +25,9 @@ function ChatRouteLayout() {
         <SidebarInset className="h-dvh" />
       ) : (
         <Outlet />
+      )}
+      {!modalOpen && shownTarget?.kind === "server" && (
+        <AgentPanel threadRef={shownTarget.threadRef} requested={team} />
       )}
       {modalOpen ? <Outlet /> : null}
       <GlobalVoiceInputIndicator hidden={modalOpen} />

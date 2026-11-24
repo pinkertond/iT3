@@ -19,13 +19,14 @@ vi.mock("~/state/entities", async (original) => ({
           settings: {
             it3Workspaces: { projects: { one: { workspace: "Work" }, two: { status: "paused" } } },
           },
-          environment: { capabilities: { it3Workspaces: true } },
+          environment: { capabilities: { it3Workspaces: true, it3AgentView: true } },
         },
       ],
     ]),
   useAllEnvironmentProjectSnapshotsReady: () => true,
   useThreadShellsForProjectRefs: () => [
     { id: "chat1", environmentId: "local", title: "First conversation" },
+    { id: "chat2", environmentId: "local", title: "Second conversation" },
   ],
 }));
 vi.mock("~/state/session", async (original) => ({
@@ -42,7 +43,9 @@ vi.mock("~/state/use-atom-command", () => ({ useAtomCommand: () => write }));
 vi.mock("~/hooks/useProjectGroupUpdate", () => ({
   useProjectGroupUpdate: () => ({ updateProjectGroup: write, canOrganizeProjectGroup: () => true }),
 }));
-vi.mock("~/components/files/projectFilesQueryState", () => ({
+vi.mock("~/hooks/useHandleNewThread", () => ({ useNewThreadHandler: () => vi.fn() }));
+vi.mock("~/components/files/projectFilesQueryState", async (original) => ({
+  ...(await original<object>()),
   useProjectFileQuery: () => ({ data: null, error: null, isPending: false }),
   useProjectEntriesQuery: () => ({ data: { entries: [{ path: "README.md", kind: "file" }] } }),
 }));
@@ -59,6 +62,13 @@ it("opens active projects by default, finds paused projects and opens a project 
   await screen.getByLabelText("Project status").selectOptions("paused");
   await expect.element(screen.getByRole("link", { name: /Dormant/ })).toBeVisible();
   await screen.getByRole("link", { name: /Dormant/ }).click();
+  await expect.element(screen.getByRole("heading", { name: "Project agents" })).toBeVisible();
+  await screen.getByLabelText("Manager chat").selectOptions("chat1");
+  expect(write).toHaveBeenCalledWith({
+    environmentId: env,
+    input: { patch: { it3Workspaces: { projects: { two: { managerThreadId: "chat1" } } } } },
+  });
+  await screen.getByRole("button", { name: "Documentation" }).click();
   await expect.element(screen.getByRole("heading", { name: "Project home" })).toBeVisible();
   await screen.getByLabelText("Project status").selectOptions("active");
   expect(write).toHaveBeenCalledWith({
@@ -82,3 +92,12 @@ it("creates a named workspace on the selected host", async () => {
   expect(useWorkspaceView.getState().workspace).toBe("w-studio");
   useWorkspaceView.getState().select("");
 });
+
+vi.mock("~/components/settings/useSettingsProjectGroups", () => ({
+  useSettingsProjectGroups: () => [
+    {
+      projectKey: "group-two",
+      memberProjects: [{ environmentId: "local", id: "two", physicalProjectKey: "p-two" }],
+    },
+  ],
+}));

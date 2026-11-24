@@ -1,8 +1,8 @@
 import styles from "./workspaces.module.css";
 import { T, useGT } from "gt-react";
 import { useState } from "react";
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { AuthSettingsWriteScope, type EnvironmentId } from "@t3tools/contracts";
+import { Link, Navigate, useNavigate, useSearch } from "@tanstack/react-router";
+import { AuthSettingsWriteScope, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
 import { FolderOpen, ChevronRight, Layers, Search } from "lucide-react";
 import {
   useProjects,
@@ -30,10 +30,17 @@ import {
 import { useWorkspaceView } from "./view";
 import { ProjectLibrary } from "./ProjectLibrary";
 
+import { useSettingsProjectGroups } from "~/components/settings/useSettingsProjectGroups";
+import { useNewThreadHandler } from "~/hooks/useHandleNewThread";
+import { agentTree, needsAttention, working } from "./agentTree";
+import { ProjectUsage } from "./ProjectUsage";
 import { PageList } from "./PageList";
 
 const route = "/workspaces";
 type SearchState = {
+  assign?: string;
+  view?: string;
+  agent?: string;
   env?: string;
   project?: string;
   status?: string;
@@ -155,7 +162,7 @@ export function WorkspacesPage() {
           {query.project ? (
             selected ? (
               <ProjectHome
-                key={JSON.stringify([selected.environmentId, selected.id])}
+                key={JSON.stringify([selected.environmentId, selected.id, query.assign])}
                 project={selected}
                 machine={labelFor(selected.environmentId)}
                 names={names}
@@ -164,6 +171,12 @@ export function WorkspacesPage() {
                   configs.get(selected.environmentId)?.environment.capabilities.it3Workspaces ===
                   true
                 }
+                agentSupported={
+                  configs.get(selected.environmentId)?.environment.capabilities.it3AgentView ===
+                  true
+                }
+                query={query}
+                go={go}
                 node={query.node}
                 onNode={(node) => {
                   const next = { ...query };
@@ -338,6 +351,9 @@ export function WorkspacesPage() {
 function ProjectHome({
   project: p,
   machine,
+  agentSupported,
+  query,
+  go,
   names,
   directory,
   supported,
@@ -349,6 +365,9 @@ function ProjectHome({
   names: Map<string, string>;
   directory: Directory | undefined;
   supported: boolean;
+  agentSupported: boolean;
+  query: SearchState;
+  go: (q: SearchState) => void;
   node: string | undefined;
   onNode: (n: string | undefined) => void;
 }) {
@@ -363,6 +382,49 @@ function ProjectHome({
   const threads = useThreadShellsForProjectRefs([
     { environmentId: p.environmentId, projectId: p.id },
   ]);
+  const newChat = useNewThreadHandler();
+  const group = useSettingsProjectGroups().find((g) =>
+    g.memberProjects.some((m) => m.environmentId === p.environmentId && m.id === p.id),
+  );
+  const checkout = group?.memberProjects.find(
+    (m) => m.environmentId === p.environmentId && m.id === p.id,
+  )?.physicalProjectKey;
+  const tree = agentTree(threads);
+  const config = directory?.projects?.[p.id];
+  const chosen = config?.managerThreadId;
+  const manager = chosen
+    ? tree.byId.get(chosen)
+    : tree.roots.length === 1
+      ? tree.roots[0]
+      : undefined;
+  const view = node ? "docs" : (query.view ?? "agents");
+  const [taskThread, setTaskThread] = useState("");
+  const [reference, setReference] = useState(query.assign ?? "");
+  const saveBinding = async (change: {
+    managerThreadId?: ThreadId | null;
+    taskRefs?: Record<ThreadId, string | null>;
+  }) => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await write({
+        environmentId: p.environmentId,
+        input: { patch: { it3Workspaces: { projects: { [p.id]: change } } } },
+      });
+      if (result._tag !== "Success") setError(gt("Could not save the project change."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!query.view && !node && manager)
+    return (
+      <Navigate
+        replace
+        to="/$environmentId/$threadId"
+        params={{ environmentId: p.environmentId, threadId: manager.id }}
+        search={{ team: true }}
+      />
+    );
   const mutate = async (change: { workspace?: string | null; status?: ProjectStatus }) => {
     if (busy) return;
     setBusy(true);
@@ -453,7 +515,157 @@ function ProjectHome({
         </p>
       )}
       {error && <p role="alert">{error}</p>}
-      <ProjectLibrary project={p} node={node} onNode={onNode} />
+      <nav className={styles["iw-tabs"]} aria-label={gt("Project views")}>
+        {[
+          ["agents", gt("Agents")],
+          ["docs", gt("Documentation")],
+          ["usage", gt("Usage and cost")],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            aria-pressed={view === key}
+            onClick={() => {
+              const next = { ...query, view: key! };
+              delete next.node;
+              go(next);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      {view === "docs" ? (
+        <ProjectLibrary project={p} node={node} onNode={onNode} />
+      ) : view === "usage" ? (
+        <ProjectUsage
+          env={p.environmentId}
+          project={p.id}
+          threads={threads}
+          refs={config?.taskRefs ?? {}}
+          supported={agentSupported}
+          agent={query.agent}
+        />
+      ) : (
+        <>
+          <h2>
+            <T>Project agents</T>
+          </h2>
+          <p>
+            {tree.rows.filter(working).length} <T>working</T> ·{" "}
+            {tree.rows.filter(needsAttention).length} <T>need attention</T>
+          </p>
+          {manager && (
+            <Link
+              className={styles["iw-row"]}
+              to="/$environmentId/$threadId"
+              params={{ environmentId: p.environmentId, threadId: manager.id }}
+              search={{ team: true }}
+            >
+              <strong>
+                <T>Open manager chat</T>
+              </strong>
+              <span>{manager.title}</span>
+              <ChevronRight size={16} />
+            </Link>
+          )}
+          <div className={styles["iw-filters"]}>
+            <label>
+              <T>Manager chat</T>
+              <select
+                aria-label={gt("Manager chat")}
+                disabled={!agentSupported || !writable || busy}
+                value={chosen ?? ""}
+                onChange={(e) =>
+                  void saveBinding({ managerThreadId: (e.target.value as ThreadId) || null })
+                }
+              >
+                <option value="">{gt("Choose a conversation")}</option>
+                {chosen && !tree.byId.has(chosen) && (
+                  <option value={chosen}>{gt("Saved manager is unavailable")}</option>
+                )}
+                {tree.roots.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className={styles["iw-action"]}
+              onClick={async () => {
+                const draft = await newChat({ environmentId: p.environmentId, projectId: p.id });
+                if (draft && agentSupported && writable)
+                  await saveBinding({ managerThreadId: draft.threadId });
+              }}
+            >
+              {gt("Start manager chat")}
+            </button>
+          </div>
+          {group && checkout && (
+            <Link
+              to="/settings/projects"
+              hash="project-defaults"
+              search={{ project: group?.projectKey, machine: p.environmentId, checkout }}
+            >
+              <T>Project permission defaults</T> ↗
+            </Link>
+          )}
+          <p className={styles["iw-secondary"]}>
+            <T>
+              Auto mode lets supported providers review requests. Requests that need a person appear
+              in the team panel.
+            </T>
+          </p>
+          {tree.rows.length > 0 && (
+            <details open={query.assign ? true : undefined} className={styles["iw-chats"]}>
+              <summary>
+                <T>Assign a task reference</T>
+              </summary>
+              <form
+                className={styles["iw-form"]}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (taskThread)
+                    void saveBinding({ taskRefs: { [taskThread]: reference.trim() || null } });
+                }}
+              >
+                <label>
+                  <T>Conversation</T>
+                  <select
+                    required
+                    value={taskThread}
+                    onChange={(e) => {
+                      setTaskThread(e.target.value);
+                      setReference(
+                        query.assign ?? config?.taskRefs?.[e.target.value as ThreadId] ?? "",
+                      );
+                    }}
+                  >
+                    <option value="">{gt("Choose a conversation")}</option>
+                    {tree.rows.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <T>Task reference</T>
+                  <input
+                    value={reference}
+                    maxLength={160}
+                    onChange={(e) => setReference(e.target.value)}
+                  />
+                </label>
+                <button disabled={!agentSupported || !writable || busy || !taskThread}>
+                  <T>Save reference</T>
+                </button>
+              </form>
+            </details>
+          )}
+        </>
+      )}
+
       <details className={styles["iw-chats"]}>
         <summary>
           <T>Chats</T> <small>{threads.length}</small>
@@ -464,6 +676,7 @@ function ProjectHome({
               key={t.id}
               className={styles["iw-row"]}
               to="/$environmentId/$threadId"
+              search={{ team: true }}
               params={{ environmentId: t.environmentId, threadId: t.id }}
             >
               {t.title}

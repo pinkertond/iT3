@@ -1,5 +1,6 @@
 // @effect-diagnostics globalDate:off
 import type {
+  ThreadId,
   UsageBucket,
   UsageCategoryCost,
   UsageDay,
@@ -64,6 +65,7 @@ interface MutableBucket {
 }
 
 export interface AggregateOptions {
+  readonly projectOwners?: ReadonlyMap<string, ThreadId>;
   readonly timeZone: string;
   readonly sinceDay: string;
   readonly untilDay: string;
@@ -225,7 +227,8 @@ function smallestGrokCopy(held: UsageRecord, copy: UsageRecord): UsageRecord {
 interface Contribution {
   record: UsageRecord;
   /** Null when the first copy fell outside the window. */
-  readonly bucket: MutableBucket | null;
+  bucket: MutableBucket | null;
+  readonly owner?: ThreadId;
 }
 
 /** Deduplicates across the whole scan; Claude copies records into resumed/forked transcripts. */
@@ -265,10 +268,14 @@ export class UsageAggregator {
   add(input: UsageRecord, sourcePath?: string): boolean {
     if (!keepsUsageRecord(this.#options.modelFilter, input)) return false;
     const record = this.#mapModel(input);
+    const project = this.#options.projectOwners;
+    const owner = project?.get(record.provider + "\n" + record.sessionId);
     if (record.dedupeKey !== null) {
       const held = this.#seen.get(record.dedupeKey);
       if (held !== undefined) {
         this.#duplicatesDropped += 1;
+        // A copied event with conflicting ownership is ambiguous in both projects.
+        if (project && held.owner !== owner) held.bucket = null;
         if (held.bucket !== null) {
           held.record =
             record.provider === "grok"
@@ -279,8 +286,10 @@ export class UsageAggregator {
       }
     }
 
-    const bucket = this.#placeInWindow(record, sourcePath ?? "");
-    if (record.dedupeKey !== null) this.#seen.set(record.dedupeKey, { record, bucket });
+    const bucket =
+      project && !owner ? null : this.#placeInWindow(record, owner ?? sourcePath ?? "");
+    if (record.dedupeKey !== null)
+      this.#seen.set(record.dedupeKey, { record, bucket, ...(owner ? { owner } : {}) });
     if (bucket === null) {
       this.#outOfWindow += 1;
       return false;
@@ -424,6 +433,7 @@ export class UsageAggregator {
     for (const [key, bucket] of this.#buckets) {
       const [day = "", hourStart = "", provider = "", model = "", sourcePath = ""] =
         key.split("\u0000");
+      if (!bucket.records) continue;
       const category = bucket.categoryCostUsd;
       const fastCostUsd = roundUsd(bucket.fastCostUsd);
       const ultrafastCostUsd = roundUsd(bucket.ultrafastCostUsd);
@@ -433,7 +443,11 @@ export class UsageAggregator {
         ...(hourStart === "" ? {} : { hourStart }),
         provider: provider as UsageBucket["provider"],
         model,
-        ...(sourcePath === "" ? {} : { sourcePath }),
+        ...(this.#options.projectOwners
+          ? { it3ThreadId: sourcePath as ThreadId }
+          : sourcePath === ""
+            ? {}
+            : { sourcePath }),
         totals: { ...bucket.totals },
         costUsd: bucket.costUsd,
         cacheSavingsUsd: bucket.cacheSavingsUsd,

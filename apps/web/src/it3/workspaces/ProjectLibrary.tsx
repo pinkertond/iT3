@@ -1,3 +1,6 @@
+import { sha256 } from "@noble/hashes/sha2";
+import { bytesToHex } from "@noble/hashes/utils";
+import { Link } from "@tanstack/react-router";
 import styles from "./workspaces.module.css";
 import { T, useGT } from "gt-react";
 import { useEffect, useState } from "react";
@@ -62,6 +65,26 @@ function safeSource(file: string) {
 }
 function useSource(project: Project, file: string | null) {
   return useProjectFileQuery(project.environmentId, project.workspaceRoot, file, file !== null);
+}
+export function TaskReference({ project, reference }: { project: Project; reference: string }) {
+  const index = useSource(project, ".it3/home/index.json");
+  const manifestData = decode(manifest, index.data?.contents);
+  const node = bytesToHex(sha256(new TextEncoder().encode(reference)));
+  const entry = useSource(
+    project,
+    manifestData ? ".it3/home/" + manifestData.digest + "/nodes/" + node + ".json" : null,
+  );
+  const task = decode(detail, entry.data?.contents);
+  return task?.id === reference && task.kind === "task" ? (
+    <Link
+      to="/workspaces"
+      search={{ project: project.id, env: project.environmentId, view: "docs", node }}
+    >
+      {task.title} ↗
+    </Link>
+  ) : (
+    <p>{reference}</p>
+  );
 }
 export function ProjectLibrary({
   project,
@@ -423,6 +446,19 @@ function RecordView({
         {item.kind} · {item.status || gt("Recorded")} · {status}
       </small>
       <p className={styles["iw-secondary"]}>{item.file}</p>
+      {item.kind === "task" && (
+        <Link
+          to="/workspaces"
+          search={{
+            env: project.environmentId,
+            project: project.id,
+            view: "agents",
+            assign: item.id,
+          }}
+        >
+          <T>Assign to a conversation</T> →
+        </Link>
+      )}
       {item.summary && <p>{item.summary}</p>}
       {item.children.count > 0 && (
         <>

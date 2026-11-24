@@ -1380,6 +1380,10 @@ export const CloudSpeechCredentials = Schema.Struct({
 // Sparse host settings keep workspace assignments shared by all clients of an environment.
 const It3WorkspaceLabel = TrimmedNonEmptyString.check(Schema.isMaxLength(80));
 const It3ProjectPlacement = Schema.Struct({
+  taskRefs: Schema.optionalKey(
+    Schema.Record(ThreadId, Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(160)))),
+  ),
+  managerThreadId: Schema.optionalKey(Schema.NullOr(ThreadId)),
   workspace: Schema.optionalKey(Schema.NullOr(It3WorkspaceLabel)),
   status: Schema.optionalKey(Schema.Literals(["active", "paused", "idle"])),
 });

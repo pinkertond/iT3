@@ -1,6 +1,12 @@
 import * as Schema from "effect/Schema";
 
-import { ForwardCompatibleArray, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  ForwardCompatibleArray,
+  NonNegativeInt,
+  ProjectId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
 
 /** Bump for incompatible UsageSummary changes; skipped unknown array variants need no bump. */
 export const USAGE_CONTRACT_VERSION = 6 as const;
@@ -56,6 +62,7 @@ export const UsageBucket = Schema.Struct({
   provider: UsageProviderKind,
   model: TrimmedNonEmptyString,
   sourcePath: Schema.optional(TrimmedNonEmptyString),
+  it3ThreadId: Schema.optionalKey(ThreadId),
   totals: UsageTokenTotals,
   costUsd: Schema.Number,
   cacheSavingsUsd: Schema.Number,
@@ -134,6 +141,7 @@ export const UsageModelFilter = Schema.Struct({
 export type UsageModelFilter = typeof UsageModelFilter.Type;
 
 export const UsageSummaryInput = Schema.Struct({
+  it3ProjectId: Schema.optionalKey(ProjectId),
   sinceDay: UsageDay,
   untilDay: UsageDay,
   /** IANA bucketing zone; offsets fail across DST boundaries. */
@@ -149,6 +157,7 @@ export const UsageSummaryInput = Schema.Struct({
 export type UsageSummaryInput = typeof UsageSummaryInput.Type;
 
 export const UsageSummary = Schema.Struct({
+  it3ProjectId: Schema.optionalKey(ProjectId),
   contractVersion: Schema.Number,
   readAt: Schema.String,
   timeZone: TrimmedNonEmptyString,

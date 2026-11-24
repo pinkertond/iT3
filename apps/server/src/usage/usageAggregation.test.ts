@@ -1,3 +1,4 @@
+import { ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 
 import { resolveModelAliases, UsageAggregator } from "./usageAggregation.ts";
@@ -71,6 +72,29 @@ function aggregate(
 }
 
 describe("UsageAggregator", () => {
+  it("only prices uniquely owned session records, including deduplicated forks in either order", () => {
+    const owner = ThreadId.make("app-thread");
+    for (const reversed of [false, true]) {
+      const aggregator = new UsageAggregator({
+        timeZone: "UTC",
+        sinceDay: "2026-08-01",
+        untilDay: "2026-08-31",
+        rates,
+        projectOwners: new Map([["claude\nsession-a", owner]]),
+      });
+      const copies = [
+        record({ dedupeKey: "copied" }),
+        record({ dedupeKey: "copied", sessionId: "outside" }),
+      ];
+      for (const item of reversed ? copies.reverse() : copies) aggregator.add(item);
+      aggregator.add(record({ dedupeKey: "own" }));
+      aggregator.add(record({ dedupeKey: "own" }));
+      aggregator.add(record({ sessionId: "unmatched" }));
+      expect(aggregator.finish().buckets).toMatchObject([
+        { it3ThreadId: owner, records: 1, totals: { outputTokens: 50 } },
+      ]);
+    }
+  });
   it("splits a bucket's cost by category and speed", () => {
     const [bucket] = aggregate([record(), record({ speed: "fast" })]).buckets;
 

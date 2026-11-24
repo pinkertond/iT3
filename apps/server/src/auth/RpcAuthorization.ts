@@ -314,6 +314,14 @@ const requiredScopesForRpcCall = (
   method: string,
   payload: unknown,
 ): ReadonlyArray<AuthEnvironmentScope> => {
+  if (
+    method === WS_METHODS.serverGetUsageSummary &&
+    typeof payload === "object" &&
+    payload !== null &&
+    "it3ProjectId" in payload
+  ) {
+    return [AuthDiagnosticsReadScope, AuthOrchestrationReadScope];
+  }
   if (method === WS_METHODS.serverRetryResourceTelemetry) {
     return [AuthEnvironmentMaintainScope, AuthDiagnosticsReadScope];
   }
