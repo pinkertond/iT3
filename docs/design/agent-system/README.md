@@ -11,6 +11,10 @@ These records use Braid Studio's **candidate 0.1.0** envelope and kind schemas a
 
 The [editable architecture diagram](architecture.json) maps the first handoff from the project roster through the extension to the native T3 thread.
 
+## Proposed manager loop
+
+[Automatic work in active projects](active-project-loop.md) defines when a ready task may start, how a shared account reserves capacity, and how the manager chooses a model and context. This extends the initial handoff design.
+
 ## Tasks and subtasks
 
 - [1. Prove the native seams](tasks/01-baseline.md)
