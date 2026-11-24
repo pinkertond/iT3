@@ -15,6 +15,8 @@ The [editable architecture diagram](architecture.json) maps the first handoff fr
 
 [Automatic work in active projects](active-project-loop.md) defines when a ready task may start, how a shared account reserves capacity, and how the manager chooses a model and context. This extends the initial handoff design.
 
+[Visual project workflows](workflow-canvas.md) connects the team, workflow and run views to the native workflow engine.
+
 ## Tasks and subtasks
 
 - [1. Prove the native seams](tasks/01-baseline.md)
