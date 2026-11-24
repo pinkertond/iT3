@@ -66,6 +66,15 @@ it("shows the checkpoint above details and hands off using the displayed generat
     delivery: "acknowledged",
     files: ["one.ts"],
     steps: [{ title: "Write one", done: true }],
+    recovery: {
+      source: "old",
+      observed: "stopped",
+      captured: "2026-01-01T00:00:00Z",
+      compared: true,
+      total: 1,
+      changes: [{ path: "extra.ts", declared: false }],
+      snapshot: "refs/it3/tasks/example",
+    },
     checkpoint: "File one verified",
     next: "Write two",
     verification: "Read one",
@@ -92,6 +101,16 @@ it("shows the checkpoint above details and hands off using the displayed generat
     <TaskBoard project={p} threads={threads} selected="T" onSelect={() => {}} />,
   );
   await expect.element(screen.getByText("File one verified")).toBeVisible();
+  await expect.element(screen.getByText("extra.ts")).toBeVisible();
+  await expect.element(screen.getByText(/Outside intended files/)).toBeVisible();
+  await screen.getByRole("button", { name: "Inspect interrupted work" }).click();
+  expect(mutate).toHaveBeenCalledWith(
+    expect.objectContaining({
+      input: expect.objectContaining({
+        edit: expect.objectContaining({ change: { action: "inspect" } }),
+      }),
+    }),
+  );
   await screen.getByText("Assign or hand off").click();
   await screen.getByRole("combobox", { name: /Receiving chat/ }).selectOptions("new");
   await screen.getByLabelText("Next action for the recipient").fill("Verify one, then write two");

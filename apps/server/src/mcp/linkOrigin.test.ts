@@ -1,3 +1,4 @@
+import { CheckpointStore } from "../checkpointing/CheckpointStore.ts";
 import * as DocumentText from "../provider/DocumentText.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -183,7 +184,9 @@ const layerTools = Layer.mergeAll(
   Layer.provide(
     Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/p" }),
   ),
-  Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+  Layer.provide(
+    Layer.merge(Layer.mock(CheckpointStore)({}), Layer.mock(GitVcsDriver.GitVcsDriver)({})),
+  ),
   Layer.provide(
     Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
       cloneRepository: (input) =>

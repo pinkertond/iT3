@@ -1,3 +1,4 @@
+import { CheckpointStore } from "../../../checkpointing/CheckpointStore.ts";
 import * as McpSchema from "effect/ai/McpSchema";
 import { TaskBrief, TaskWorkerEdit } from "@t3tools/contracts";
 import { McpAttachmentInput } from "../attachment/input.ts";
@@ -214,7 +215,12 @@ const TaskUpdateTool = Tool.make("t3_task_update", {
     "Update this chat’s task attempt. Read its brief first. Claim with intended files and next action. Checkpoint after each subtask with the full current step and file lists. Submit with verification after all steps are done. Copy generation and revision from the latest brief. Retry an identical request with the same requestId.",
   parameters: TaskWorkerEdit,
   success: TaskBrief,
-  dependencies: [...shared.dependencies, ServerConfig.ServerConfig],
+  dependencies: [
+    ...shared.dependencies,
+    ServerConfig.ServerConfig,
+    CheckpointStore,
+    GitVcsDriver.GitVcsDriver,
+  ],
 }).annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 export const ProjectToolkit = Toolkit.make(
   TaskBriefTool,

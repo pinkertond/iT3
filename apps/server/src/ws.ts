@@ -1,3 +1,5 @@
+import { taskCheckouts } from "./it3/taskRecovery.ts";
+import { CheckpointStore } from "./checkpointing/CheckpointStore.ts";
 import { handleTaskWrite } from "./it3/taskHandoff.ts";
 import { readTask } from "./it3/taskLedger.ts";
 import { readProjectUsageOwners } from "./it3/projectUsage.ts";
@@ -1557,6 +1559,7 @@ export const layerWsRpc = (
       const gitWorkflow = yield* GitWorkflowService.GitWorkflowService;
       const review = yield* ReviewService.ReviewService;
       const vcsProvisioning = yield* VcsProvisioningService.VcsProvisioningService;
+      const it3Checkouts = taskCheckouts(yield* CheckpointStore, yield* GitVcsDriver.GitVcsDriver);
       const vcsStatusBroadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const terminalManager = yield* TerminalManager.TerminalManager;
       const prepareTerminalLaunch = yield* makePrepareTerminalLaunch(
@@ -2826,6 +2829,7 @@ export const layerWsRpc = (
             currentSessionId,
             threadManagement,
             projectService,
+            it3Checkouts,
           ),
         [WS_METHODS.serverGetUsageSummary]: (input) =>
           input.it3ProjectId === undefined

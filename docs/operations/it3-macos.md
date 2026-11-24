@@ -70,4 +70,6 @@ Verify the installed version and running app on the target:
 lsappinfo find bundleid=com.pinkertond.it3
 ```
 
+For a two-Mac recovery check, open the same host environment from the second Mac. In a disposable Git project, interrupt a worker after an intended file and an undeclared file are written, before it checkpoints. Use the second client to inspect the attempt, confirm both paths and assign another chat. Verify the original host and the second client see the same accepted result.
+
 For rollback, quit iT3, move the current bundle aside, and restore the previous bundle from the backup directory. Back up the stopped environment before any upgrade that migrates its database. Restoring a bundle alone cannot undo a data migration.

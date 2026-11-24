@@ -8,6 +8,17 @@ const files = Schema.Array(short).check(Schema.isMaxLength(64));
 const steps = Schema.Array(Schema.Struct({ title: short, done: Schema.Boolean })).check(
   Schema.isMaxLength(64),
 );
+export const TaskRecovery = Schema.Struct({
+  source: ThreadId,
+  sourceWorktree: Schema.NullOr(Schema.String),
+  observed: Schema.Literals(["stopped", "busy", "unknown"]),
+  captured: Schema.String,
+  snapshot: Schema.NullOr(Schema.String),
+  compared: Schema.Boolean,
+  total: NonNegativeInt,
+  changes: Schema.Array(Schema.Struct({ path: Schema.String, declared: Schema.Boolean })),
+});
+export type TaskRecovery = typeof TaskRecovery.Type;
 export const TaskAttempt = Schema.Struct({
   number: Schema.Literals([1, 2]),
   generation: NonNegativeInt,
@@ -21,6 +32,8 @@ export const TaskAttempt = Schema.Struct({
   worktree: Schema.NullOr(Schema.String),
   files,
   steps,
+  baseline: Schema.optionalKey(Schema.String),
+  recovery: Schema.optionalKey(TaskRecovery),
   checkpoint: Schema.String,
   next: Schema.String,
   verification: Schema.String,
@@ -59,6 +72,7 @@ const TaskAction = Schema.Union([
     steps,
   }),
   Schema.Struct({ action: Schema.Literal("handoff"), target: ThreadId, next: note }),
+  Schema.Struct({ action: Schema.Literal("inspect") }),
   ...workerActions,
   Schema.Struct({ action: Schema.Literal("notify") }),
   Schema.Struct({ action: Schema.Literal("accept") }),

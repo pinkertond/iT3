@@ -1,3 +1,5 @@
+import * as Cause from "effect/Cause";
+import * as Option from "effect/Option";
 import { BranchUsage } from "./ProjectUsage";
 import { useDiffPanelStore } from "~/diffPanelStore";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -83,10 +85,14 @@ export function TaskBoard({ project, threads, selected, seed, source, thread, on
       if (result._tag === "Success") {
         setCreating(false);
         onSelect(edit.key);
-      } else
+      } else {
+        const reason = Option.getOrNull(Cause.findErrorOption(result.cause));
         setError(
-          gt("The update could not be confirmed. Check the refreshed task before retrying."),
+          reason instanceof Error
+            ? reason.message
+            : gt("The update could not be confirmed. Check the refreshed task before retrying."),
         );
+      }
     } finally {
       setBusy(false);
       refresh();
@@ -369,6 +375,73 @@ function Attempt({
         </dt>
         <dd>{a.next || gt("No next action")}</dd>
       </dl>
+      {a.recovery && (
+        <section aria-label={gt("Recovery brief")}>
+          <h4>
+            <T>Recovery brief</T>
+          </h4>
+          <p>
+            {a.recovery.observed === "stopped"
+              ? gt("Previous turn stopped")
+              : a.recovery.observed === "busy"
+                ? gt("Previous chat was busy")
+                : gt("Previous turn status unknown")}{" "}
+            · {new Date(a.recovery.captured).toLocaleString()}
+          </p>
+          {a.recovery.compared ? (
+            <>
+              <strong>
+                {a.recovery.total} <T>file changes since the last claim or checkpoint</T>
+              </strong>
+              <PageList items={a.recovery.changes}>
+                {(f) => (
+                  <p key={f.path}>
+                    <code>{f.path}</code> ·{" "}
+                    {f.declared ? gt("Intended") : gt("Outside intended files")}
+                  </p>
+                )}
+              </PageList>
+              {a.recovery.total > a.recovery.changes.length && (
+                <p>
+                  <T>Showing the first 64 paths. Review the snapshot for the full diff.</T>
+                </p>
+              )}
+            </>
+          ) : (
+            <p>
+              <T>File comparison unavailable. Verify the checkout before continuing.</T>
+            </p>
+          )}
+          {a.recovery.snapshot && (
+            <details>
+              <summary>
+                <T>Recover in a separate worktree</T>
+              </summary>
+              <p>
+                <T>
+                  From this repository, create a new worktree from the inspected snapshot. Open a
+                  chat in it and choose it as the recipient.
+                </T>
+              </p>
+              <code>
+                git worktree add --detach ../it3-recovery-{a.recovery.snapshot.slice(-8)}{" "}
+                {a.recovery.snapshot}
+              </code>
+              <p>
+                <T>
+                  The snapshot covers files captured by Git. Verify ignored files and external
+                  changes separately.
+                </T>
+              </p>
+            </details>
+          )}
+        </section>
+      )}
+      {a.stage === "working" && (
+        <button disabled={disabled} onClick={() => void change({ action: "inspect" })}>
+          <T>Inspect interrupted work</T>
+        </button>
+      )}
       {a.delivery !== "none" && (
         <small>
           {gt("Handoff")} · {a.delivery}
@@ -453,7 +526,7 @@ function Attempt({
               <select required value={target} onChange={(e) => setTarget(e.target.value)}>
                 <option value="">{gt("Choose a conversation")}</option>
                 {threads
-                  .filter((t) => !t.deletedAt && !t.archivedAt)
+                  .filter((t) => !t.deletedAt && !t.archivedAt && t.id !== a.owner)
                   .map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.title}

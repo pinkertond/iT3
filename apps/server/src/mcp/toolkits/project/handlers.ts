@@ -1,3 +1,5 @@
+import { taskCheckouts, observeTurn } from "../../../it3/taskRecovery.ts";
+import { CheckpointStore } from "../../../checkpointing/CheckpointStore.ts";
 import * as It3Config from "../../../config.ts";
 import { readTaskBrief, writeTask } from "../../../it3/taskLedger.ts";
 import {
@@ -537,20 +539,87 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
   ),
   t3_task_update: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
-      const { caller } = yield* readCaller();
+      const { caller, threads } = yield* readCaller();
       if (!caller)
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",
           message: "Open the assigned chat.",
         });
       const config = yield* It3Config.ServerConfig;
-      return yield* writeTask(config.stateDir, caller.projectId, input, {
-        kind: "worker",
-        id: caller.id,
-        title: caller.title,
-        model: caller.modelSelection.model,
-        worktree: caller.worktreePath,
-      }).pipe(
+      const checkouts = taskCheckouts(yield* CheckpointStore, yield* GitVcsDriver.GitVcsDriver);
+      const projects = yield* Project.ProjectService;
+      const project = yield* projects.getById(caller.projectId).pipe(Effect.mapError(unavailable));
+      if (Option.isNone(project)) return yield* unavailable();
+      const cwd = caller.worktreePath ?? project.value.workspaceRoot;
+      const task = yield* readTaskBrief(
+        config.stateDir,
+        caller.projectId,
+        input.key,
+        caller.id,
+        input.attempt,
+      ).pipe(
+        Effect.mapError(
+          (e) => new OrchestratorMcpFailure({ code: "invalid_request", message: e.detail }),
+        ),
+      );
+      const slot = task.attempts.find((a) => a.number === input.attempt);
+      const fresh = slot?.generation === input.generation && slot.revision === input.revision;
+      if (
+        fresh &&
+        input.change.action === "claim" &&
+        slot.stage === "assigned" &&
+        slot.owner === caller.id &&
+        slot.recovery
+      ) {
+        const from = slot.recovery;
+        if (slot.worktree === from.sourceWorktree) {
+          const source = yield* threads
+            .getThreadShell(from.source)
+            .pipe(Effect.orElseSucceed(() => null));
+          if (observeTurn(source) !== "stopped")
+            return yield* new OrchestratorMcpFailure({
+              code: "invalid_request",
+              message:
+                "The previous chat became active or unavailable. Confirm its turn has stopped before claiming.",
+            });
+        } else if (!from.snapshot || !(yield* checkouts.matches(cwd, from.snapshot))) {
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message:
+              "The recovery worktree changed before the claim. Verify its contents against the saved snapshot.",
+          });
+        }
+      }
+      const capture =
+        fresh &&
+        ((input.change.action === "claim" &&
+          !slot.hasClaimed &&
+          (slot.stage === "ready" || (slot.stage === "assigned" && slot.owner === caller.id))) ||
+          (input.change.action === "checkpoint" &&
+            slot.stage === "working" &&
+            slot.owner === caller.id));
+      const baseline = capture ? yield* checkouts.baseline(cwd) : undefined;
+      return yield* writeTask(
+        config.stateDir,
+        caller.projectId,
+        input,
+        {
+          kind: "worker",
+          id: caller.id,
+          title: caller.title,
+          model: caller.modelSelection.model,
+          worktree: caller.worktreePath,
+        },
+        { baseline },
+      ).pipe(
+        Effect.onError(() => (baseline ? checkouts.release(cwd, baseline) : Effect.void)),
+        Effect.tap((task) => {
+          const kept = task.attempts.find((a) => a.number === input.attempt)?.baseline;
+          const obsolete = [slot?.baseline, baseline].filter(
+            (ref): ref is string => !!ref && ref !== kept,
+          );
+          return Effect.forEach(obsolete, (ref) => checkouts.release(cwd, ref), { discard: true });
+        }),
         Effect.map((task) =>
           task.comparison
             ? { ...task, attempts: task.attempts.filter((a) => a.number === input.attempt) }

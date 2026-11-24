@@ -13,7 +13,8 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
 
-import { readTask, writeTask } from "./taskLedger.ts";
+import { observeTurn, type SourceShell, type TaskCheckouts } from "./taskRecovery.ts";
+import { type RecoveryEvidence, readTask, writeTask } from "./taskLedger.ts";
 
 export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
   ReadError,
@@ -27,17 +28,24 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
     getThreadShell: (
       id: ThreadId,
     ) => Effect.Effect<
-      Pick<
-        OrchestrationV2ThreadShell,
-        "projectId" | "archivedAt" | "deletedAt" | "worktreePath"
-      > | null,
+      | (Pick<
+          OrchestrationV2ThreadShell,
+          "projectId" | "archivedAt" | "deletedAt" | "worktreePath"
+        > &
+          SourceShell)
+      | null,
       ReadError
     >;
     sendToThread: (
       input: Parameters<ThreadManagementService["Service"]["sendToThread"]>[0],
     ) => Effect.Effect<unknown, SendError>;
   },
-  projects: { getById: (id: ProjectId) => Effect.Effect<Option.Option<unknown>, ProjectError> },
+  projects: {
+    getById: (
+      id: ProjectId,
+    ) => Effect.Effect<Option.Option<{ workspaceRoot: string }>, ProjectError>;
+  },
+  checkouts: TaskCheckouts,
 ) {
   const { projectId, edit } = input;
   const actor = { kind: "operator" as const, id: operator };
@@ -46,10 +54,56 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
     .pipe(Effect.mapError(() => new TaskLedgerError({ detail: "Could not read this project." })));
   if (Option.isNone(project))
     return yield* new TaskLedgerError({ detail: "Project does not exist." });
-  if (edit.change.action !== "handoff" && edit.change.action !== "notify")
+  if (
+    edit.change.action !== "handoff" &&
+    edit.change.action !== "notify" &&
+    edit.change.action !== "inspect"
+  )
     return yield* writeTask(directory, projectId, edit, actor);
   const before = yield* readTask(directory, projectId, edit.key);
   const slot = before.brief?.attempts.find((a) => a.number === edit.attempt);
+  const root = project.value.workspaceRoot;
+  const evidence: RecoveryEvidence = {};
+  const inspect = (a: NonNullable<typeof slot>, source: ThreadId) =>
+    threads.getThreadShell(source).pipe(
+      Effect.orElseSucceed(() => null),
+      Effect.flatMap((shell) =>
+        checkouts.inspect(
+          a.worktree ?? root,
+          a,
+          source,
+          observeTurn(shell?.projectId === projectId ? shell : null),
+        ),
+      ),
+    );
+  const persist = () =>
+    writeTask(directory, projectId, edit, actor, evidence).pipe(
+      Effect.onError(() =>
+        evidence.recovery?.snapshot
+          ? checkouts.release(slot?.worktree ?? root, evidence.recovery.snapshot)
+          : Effect.void,
+      ),
+      Effect.tap((task) => {
+        const kept = task.attempts.find((a) => a.number === edit.attempt)?.recovery?.snapshot;
+        const obsolete = [slot?.recovery?.snapshot, evidence.recovery?.snapshot].filter(
+          (ref): ref is string => !!ref && ref !== kept,
+        );
+        return Effect.forEach(obsolete, (ref) => checkouts.release(slot?.worktree ?? root, ref), {
+          discard: true,
+        });
+      }),
+    );
+  if (edit.change.action === "inspect") {
+    if (
+      !slot?.owner ||
+      slot.stage !== "working" ||
+      slot.revision !== edit.revision ||
+      slot.generation !== edit.generation
+    )
+      return yield* writeTask(directory, projectId, edit, actor);
+    evidence.recovery = yield* inspect(slot, slot.owner);
+    return yield* persist();
+  }
   const target = edit.change.action === "handoff" ? edit.change.target : slot?.owner;
   if (!target) return yield* new TaskLedgerError({ detail: "Choose a receiving chat." });
   const shell = yield* threads
@@ -71,12 +125,55 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
     return yield* new TaskLedgerError({
       detail: "Choose a separate worktree chat for each attempt.",
     });
-  if (slot?.hasClaimed && slot.worktree !== shell.worktreePath)
-    return yield* new TaskLedgerError({ detail: "Choose a chat in the attempt’s worktree." });
-  const saved =
-    edit.change.action === "handoff"
-      ? yield* writeTask(directory, projectId, edit, actor)
-      : before.brief!;
+  if (
+    slot &&
+    (slot.hasClaimed || slot.stage === "assigned") &&
+    edit.change.action === "handoff" &&
+    slot.revision === edit.revision &&
+    slot.generation === edit.generation
+  ) {
+    if (!slot.owner || slot.owner === target)
+      return yield* new TaskLedgerError({ detail: "Choose a different receiving chat." });
+    // A queued recipient can wake later. Moving a pending transfer again requires a fresh checkout.
+    if (
+      slot.stage === "assigned" &&
+      (slot.worktree === shell.worktreePath || slot.recovery?.sourceWorktree === shell.worktreePath)
+    )
+      return yield* new TaskLedgerError({
+        detail: "Choose a fresh recovery worktree to redirect a pending assignment.",
+      });
+    const recovery = yield* inspect(slot, slot.owner);
+    if (slot.worktree === shell.worktreePath) {
+      if (recovery.observed !== "stopped") {
+        if (recovery.snapshot) yield* checkouts.release(slot.worktree ?? root, recovery.snapshot);
+        return yield* new TaskLedgerError({
+          detail:
+            "The previous turn has not confirmed a stop. Stop it in its chat or use a separate recovery worktree.",
+        });
+      }
+    } else {
+      const destination = shell.worktreePath;
+      if (
+        !destination ||
+        !(yield* checkouts.worktrees(root)).includes(destination) ||
+        !(yield* checkouts.distinct(slot.worktree ?? root, destination)) ||
+        (slot.stage === "assigned" &&
+          slot.recovery &&
+          !(yield* checkouts.distinct(slot.recovery.sourceWorktree ?? root, destination))) ||
+        !recovery.snapshot ||
+        !(yield* checkouts.matches(destination, recovery.snapshot))
+      ) {
+        if (recovery.snapshot) yield* checkouts.release(slot.worktree ?? root, recovery.snapshot);
+        return yield* new TaskLedgerError({
+          detail:
+            "The receiving worktree must contain the inspected checkout. Inspect the attempt and create a worktree from its recovery snapshot.",
+        });
+      }
+      evidence.destination = destination;
+    }
+    evidence.recovery = recovery;
+  }
+  const saved = edit.change.action === "handoff" ? yield* persist() : before.brief!;
   const a = saved.attempts.find((x) => x.number === edit.attempt)!;
   const generation = edit.generation + (edit.change.action === "handoff" ? 1 : 0);
   if (
@@ -86,6 +183,16 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
     a.delivery === "queued"
   )
     return saved;
+  if (a.recovery && a.recovery.sourceWorktree === shell.worktreePath) {
+    const former = yield* threads
+      .getThreadShell(a.recovery.source)
+      .pipe(Effect.orElseSucceed(() => null));
+    if (observeTurn(former) !== "stopped")
+      return yield* new TaskLedgerError({
+        detail:
+          "Assignment saved. The previous chat must stop before delivery. Then use Retry delivery.",
+      });
+  }
   const receipt = NodeCrypto.createHash("sha256")
     .update([projectId, edit.key, a.number, a.generation].join("\u0000"))
     .digest("hex");
@@ -95,7 +202,7 @@ export const handleTaskWrite = Effect.fn("it3.task.edit")(function* <
       commandId: CommandId.make("it3-task-" + receipt),
       threadId: target,
       messageId: MessageId.make("it3-task-" + receipt),
-      text: `iT3 task assignment ${edit.key}, attempt ${a.number}, generation ${a.generation}. Read t3_task_brief with this key. If its owner, attempt and generation still match this notice, use t3_task_update to claim it, declare intended files, verify the saved checkpoint and continue. Save progress after each subtask.`,
+      text: `Assigned iT3 task. Call t3_task_brief with this exact input: {"key":"${edit.key}","attempt":${a.number}}. Expected generation ${a.generation}. If its owner, attempt and generation still match this notice, use t3_task_update to claim it, declare intended files, review recovery.changes as unverified working files, verify the checkpoint and continue. Save progress after each subtask.`,
       attachments: [],
       mode: "queue",
       createdBy: "system",

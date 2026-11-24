@@ -9,6 +9,7 @@ import {
   type TaskAttempt,
   type TaskEdit,
   type TaskPage,
+  type TaskRecovery,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -177,11 +178,17 @@ function validateFiles(files: readonly string[]) {
   )
     refuse("Use unique repository-relative file paths.");
 }
+export interface RecoveryEvidence {
+  baseline?: string | undefined;
+  recovery?: TaskRecovery | undefined;
+  destination?: string | null | undefined;
+}
 function reduce(
   current: TaskBrief | null,
   edit: TaskEdit,
   actor: TaskActor,
   at: string,
+  evidence: RecoveryEvidence,
 ): TaskBrief {
   const c = edit.change;
   if (c.action === "claim" || c.action === "checkpoint") validateFiles(c.files);
@@ -222,6 +229,11 @@ function reduce(
   let a = { ...old, revision: old.revision + 1, updated: at };
   let accepted: number | null = null;
   switch (c.action) {
+    case "inspect":
+      if (actor.kind !== "operator" || old.stage !== "working" || !evidence.recovery)
+        refuse("Only a working attempt can be inspected.");
+      a.recovery = evidence.recovery;
+      break;
     case "handoff":
       if (actor.kind !== "operator" || old.stage === "submitted")
         refuse("This attempt cannot be reassigned.");
@@ -232,6 +244,8 @@ function reduce(
         refuse("Choose a separate receiving conversation for each attempt.");
       a = {
         ...a,
+        ...(evidence.recovery ? { recovery: evidence.recovery } : {}),
+        ...(evidence.destination !== undefined ? { worktree: evidence.destination } : {}),
         owner: c.target,
         ownerTitle: c.target,
         model: "",
@@ -321,13 +335,23 @@ function reduce(
       accepted = a.number;
       break;
   }
+  if ((c.action === "claim" && !old.hasClaimed) || c.action === "checkpoint") {
+    delete a.baseline;
+    if (evidence.baseline) a.baseline = evidence.baseline;
+  }
   return {
     ...task,
     accepted,
     attempts: task.attempts.map((other) => (other.number === a.number ? a : other)),
   };
 }
-export function writeTask(directory: string, project: string, edit: TaskEdit, actor: TaskActor) {
+export function writeTask(
+  directory: string,
+  project: string,
+  edit: TaskEdit,
+  actor: TaskActor,
+  evidence: RecoveryEvidence = {},
+) {
   return guard(() => {
     const db = connect(directory);
     try {
@@ -345,7 +369,7 @@ export function writeTask(directory: string, project: string, edit: TaskEdit, ac
         return current;
       }
       const at = new Date().toISOString(),
-        result = reduce(current, edit, actor, at);
+        result = reduce(current, edit, actor, at, evidence);
       const c = edit.change;
       const summary =
         c.action === "create"
@@ -354,11 +378,13 @@ export function writeTask(directory: string, project: string, edit: TaskEdit, ac
             ? c.target + " · " + c.next
             : c.action === "claim"
               ? c.next
-              : c.action === "accept"
-                ? "Accepted result"
-                : c.action === "notify"
-                  ? "Queued in the receiving chat"
-                  : c.checkpoint;
+              : c.action === "inspect"
+                ? "Inspected working files and previous turn"
+                : c.action === "accept"
+                  ? "Accepted result"
+                  : c.action === "notify"
+                    ? "Queued in the receiving chat"
+                    : c.checkpoint;
       const detail =
         c.action === "checkpoint"
           ? [
