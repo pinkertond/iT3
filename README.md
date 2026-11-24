@@ -1,3 +1,5 @@
+**iT3 for macOS** · [Build, version, install, and update the fork](docs/operations/it3-macos.md)
+
 <p align="center">
   <a href="https://t3.codes">
     <img src="./assets/prod/t3-black-web-icon-192x192.png" width="80" height="80" alt="T3 Code logo" />

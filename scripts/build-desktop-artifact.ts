@@ -2869,6 +2869,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "mac") {
     const path = yield* Path.Path;
     const repoRoot = yield* RepoRoot;
+    if (!signed) {
+      buildConfig.afterPack = path.join(repoRoot, "scripts/prepare-local-mac.cjs");
+    }
     buildConfig.mac = {
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
